@@ -86,6 +86,22 @@ inline HMODULE d3d12AgilityModule = nullptr;
 inline HMODULE slInterposerModule = nullptr;
 inline DWORD processId;
 
+// ---------------------------------------------------------------------------
+// Logging macros.
+//
+// MSVC treats __FUNCTION__ as a string *literal*, so the original macros could
+// concatenate it directly into the format string (__FUNCTION__ " " msg).
+// Clang/GCC (used for the ARM64EC / mingw-w64 build) define __FUNCTION__ as a
+// static const char[] variable, where that concatenation is a syntax error.
+//
+// For those compilers the function name is passed through spdlog's source_loc
+// instead and rendered by the "%!" pattern flag (see OPTI_PATTERN_FUNC in
+// Logger.cpp). This keeps the format string untouched, so positional
+// placeholders ({0}, {1:X}, ...) used across the codebase still line up, and
+// costs no extra allocation.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+
 #define LOG_TRACE(msg, ...) spdlog::trace(__FUNCTION__ " " msg, ##__VA_ARGS__)
 
 #define LOG_DEBUG(msg, ...) spdlog::debug(__FUNCTION__ " " msg, ##__VA_ARGS__)
@@ -111,6 +127,52 @@ inline DWORD processId;
 #define LOG_FUNC() spdlog::trace(__FUNCTION__)
 
 #define LOG_FUNC_RESULT(result) spdlog::trace(__FUNCTION__ " result: {0:X}", (UINT64) result)
+
+#ifdef TRACKING_LOGS
+#define LOG_TRACK(msg, ...) spdlog::debug(__FUNCTION__ " [RT] " msg, ##__VA_ARGS__)
+#else
+#define LOG_TRACK(msg, ...)
+#endif
+
+#else // !_MSC_VER
+
+#define OPTI_SRCLOC spdlog::source_loc { __FILE__, __LINE__, __FUNCTION__ }
+
+#define OPTI_LOG(lvl, msg, ...) spdlog::default_logger_raw()->log(OPTI_SRCLOC, lvl, msg, ##__VA_ARGS__)
+
+#define LOG_TRACE(msg, ...) OPTI_LOG(spdlog::level::trace, msg, ##__VA_ARGS__)
+
+#define LOG_DEBUG(msg, ...) OPTI_LOG(spdlog::level::debug, msg, ##__VA_ARGS__)
+
+#ifdef DETAILED_DEBUG_LOGS
+#define LOG_DEBUG_ONLY(msg, ...) OPTI_LOG(spdlog::level::debug, msg, ##__VA_ARGS__)
+#else
+#define LOG_DEBUG_ONLY(msg, ...)
+#endif
+
+#ifdef LOG_ASYNC
+#define LOG_DEBUG_ASYNC(msg, ...) OPTI_LOG(spdlog::level::debug, msg, ##__VA_ARGS__)
+#else
+#define LOG_DEBUG_ASYNC(msg, ...)
+#endif
+
+#define LOG_INFO(msg, ...) OPTI_LOG(spdlog::level::info, msg, ##__VA_ARGS__)
+
+#define LOG_WARN(msg, ...) OPTI_LOG(spdlog::level::warn, msg, ##__VA_ARGS__)
+
+#define LOG_ERROR(msg, ...) OPTI_LOG(spdlog::level::err, msg, ##__VA_ARGS__)
+
+#define LOG_FUNC() OPTI_LOG(spdlog::level::trace, "")
+
+#define LOG_FUNC_RESULT(result) OPTI_LOG(spdlog::level::trace, "result: {0:X}", (UINT64) result)
+
+#ifdef TRACKING_LOGS
+#define LOG_TRACK(msg, ...) OPTI_LOG(spdlog::level::debug, "[RT] " msg, ##__VA_ARGS__)
+#else
+#define LOG_TRACK(msg, ...)
+#endif
+
+#endif // _MSC_VER
 
 // #define TRACKING_LOGS
 

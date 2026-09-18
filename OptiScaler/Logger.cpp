@@ -1,3 +1,12 @@
+// On non-MSVC builds (ARM64EC / mingw-w64) the function name is carried via
+// spdlog::source_loc rather than baked into the format string, so it must be
+// rendered by the "%!" pattern flag. See the logging macros in SysUtils.h.
+#ifdef _MSC_VER
+#define OPTI_PATTERN_FUNC ""
+#else
+#define OPTI_PATTERN_FUNC "%! "
+#endif
+
 #include "pch.h"
 #include "Logger.h"
 #include "Config.h"
@@ -94,9 +103,9 @@ void PrepareLogger()
                 debug_sink->set_level(spdlog::level::level_enum::trace);
 
 #ifdef LOG_ASYNC
-                debug_sink->set_pattern("%H:%M:%S.%f\t%L\t%v");
+                debug_sink->set_pattern("%H:%M:%S.%f\t%L\t" OPTI_PATTERN_FUNC "%v");
 #else
-                debug_sink->set_pattern("[%H:%M:%S.%f] [%L] %v");
+                debug_sink->set_pattern("[%H:%M:%S.%f] [%L] " OPTI_PATTERN_FUNC "%v");
                 // file_sink->set_pattern("[%H:%M:%S.%f] [thread %t] [%L] %v");
 #endif // LOG_ASYNC
 
@@ -107,7 +116,7 @@ void PrepareLogger()
             {
                 auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
                 console_sink->set_level(spdlog::level::level_enum::info);
-                console_sink->set_pattern("[%H:%M:%S.%f] [%L] %v");
+                console_sink->set_pattern("[%H:%M:%S.%f] [%L] " OPTI_PATTERN_FUNC "%v");
 
                 sinks.push_back(console_sink);
             }
@@ -118,9 +127,9 @@ void PrepareLogger()
                     Config::Instance()->LogFileName.value_or_default(), true);
                 file_sink->set_level(spdlog::level::level_enum::trace);
 #ifdef LOG_ASYNC
-                file_sink->set_pattern("%H:%M:%S.%f\t%L\t%v");
+                file_sink->set_pattern("%H:%M:%S.%f\t%L\t" OPTI_PATTERN_FUNC "%v");
 #else
-                file_sink->set_pattern("[%H:%M:%S.%f] [%L] %v");
+                file_sink->set_pattern("[%H:%M:%S.%f] [%L] " OPTI_PATTERN_FUNC "%v");
                 // file_sink->set_pattern("[%H:%M:%S.%f] [thread %t] [%L] %v");
 #endif // LOG_ASYNC
 
@@ -143,7 +152,7 @@ void PrepareLogger()
                 });
 
             callback_sink->set_level(spdlog::level::level_enum::trace);
-            callback_sink->set_pattern("[%H:%M:%S.%f] [%L] %v");
+            callback_sink->set_pattern("[%H:%M:%S.%f] [%L] " OPTI_PATTERN_FUNC "%v");
 
             sinks.push_back(callback_sink);
 
@@ -170,7 +179,7 @@ void PrepareLogger()
         std::cerr << ex.what() << std::endl;
 
         auto logger = spdlog::stdout_color_mt("xess");
-        logger->set_pattern("[%H:%M:%S.%f] [%L] %v");
+        logger->set_pattern("[%H:%M:%S.%f] [%L] " OPTI_PATTERN_FUNC "%v");
         logger->set_level((spdlog::level::level_enum) 2);
         spdlog::set_default_logger(logger);
     }
