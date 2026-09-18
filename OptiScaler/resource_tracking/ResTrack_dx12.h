@@ -83,7 +83,7 @@ class SpinLock
             }
 
             // 3. Pause instruction to help HT and branch prediction
-            _mm_pause();
+            YieldProcessor();
         }
     }
 
@@ -110,7 +110,7 @@ struct SpinLock
             while (_lock.load(std::memory_order_relaxed))
             {
                 for (int i = 0; i < backoff; ++i)
-                    _mm_pause();
+                    YieldProcessor();
 
                 backoff = std::min(backoff * 2, 64);
             }
