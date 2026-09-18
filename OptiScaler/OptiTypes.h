@@ -63,6 +63,9 @@ enum class Upscaler
     DLSS, // "dlss", used for the DLSS upscaler backend
 
     DLSSD, // "dlssd", used for the DLSS-D/Ray Reconstruction upscaler+denoiser backend
+
+    SGSR2, // "sgsr2", Snapdragon Game Super Resolution 2; shader-only, no vendor runtime to link
+
     Reset
 };
 
