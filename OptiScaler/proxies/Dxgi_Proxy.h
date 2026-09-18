@@ -1,5 +1,14 @@
 #pragma once
 
+// MSVC allows an implicit function-pointer -> void* conversion; clang does
+// not. OptiFnArg (compat/arm64ec/opti_msvc_compat.h) restores it.
+#ifdef _MSC_VER
+#define OPTI_FN_ARG PVOID
+#else
+#define OPTI_FN_ARG OptiFnArg
+#endif
+
+
 #include "SysUtils.h"
 
 #include <State.h>
@@ -85,7 +94,7 @@ class DxgiProxy
         return (PFN_GetDebugInterface) KernelBaseProxy::GetProcAddress_()(_dll, "DXGIGetDebugInterface1");
     }
 
-    static PFN_CreateDxgiFactory Hook_CreateDxgiFactory(PVOID method)
+    static PFN_CreateDxgiFactory Hook_CreateDxgiFactory(OPTI_FN_ARG method)
     {
         auto addr = CreateDxgiFactory_ForHook();
 
@@ -103,7 +112,7 @@ class DxgiProxy
         return addr;
     }
 
-    static PFN_CreateDxgiFactory1 Hook_CreateDxgiFactory1(PVOID method)
+    static PFN_CreateDxgiFactory1 Hook_CreateDxgiFactory1(OPTI_FN_ARG method)
     {
         auto addr = CreateDxgiFactory1_ForHook();
 
@@ -121,7 +130,7 @@ class DxgiProxy
         return addr;
     }
 
-    static PFN_CreateDxgiFactory2 Hook_CreateDxgiFactory2(PVOID method)
+    static PFN_CreateDxgiFactory2 Hook_CreateDxgiFactory2(OPTI_FN_ARG method)
     {
         auto addr = CreateDxgiFactory2_ForHook();
 
@@ -139,7 +148,7 @@ class DxgiProxy
         return addr;
     }
 
-    static PFN_DeclareAdepterRemovalSupport Hook_DeclareAdepterRemovalSupport(PVOID method)
+    static PFN_DeclareAdepterRemovalSupport Hook_DeclareAdepterRemovalSupport(OPTI_FN_ARG method)
     {
         auto addr = DeclareAdepterRemovalSupport_ForHook();
 
@@ -157,7 +166,7 @@ class DxgiProxy
         return addr;
     }
 
-    static PFN_GetDebugInterface Hook_GetDebugInterface(PVOID method)
+    static PFN_GetDebugInterface Hook_GetDebugInterface(OPTI_FN_ARG method)
     {
         auto addr = GetDebugInterface_ForHook();
 

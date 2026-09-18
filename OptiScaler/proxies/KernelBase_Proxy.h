@@ -1,5 +1,14 @@
 #pragma once
 
+// MSVC allows an implicit function-pointer -> void* conversion; clang does
+// not. OptiFnArg (compat/arm64ec/opti_msvc_compat.h) restores it.
+#ifdef _MSC_VER
+#define OPTI_FN_ARG PVOID
+#else
+#define OPTI_FN_ARG OptiFnArg
+#endif
+
+
 #include "SysUtils.h"
 
 #include <detours/detours.h>
@@ -88,7 +97,7 @@ class KernelBaseProxy
         return (PFN_GetModuleHandleExW) KernelBaseProxy::GetProcAddress_()(_dll, "GetModuleHandleExW");
     }
 
-    static PFN_FreeLibrary Hook_FreeLibrary(PVOID method)
+    static PFN_FreeLibrary Hook_FreeLibrary(OPTI_FN_ARG method)
     {
         auto addr = FreeLibrary_Hooked();
 
@@ -106,7 +115,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_LoadLibraryA Hook_LoadLibraryA(PVOID method)
+    static PFN_LoadLibraryA Hook_LoadLibraryA(OPTI_FN_ARG method)
     {
         auto addr = LoadLibraryA_Hooked();
 
@@ -124,7 +133,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_LoadLibraryW Hook_LoadLibraryW(PVOID method)
+    static PFN_LoadLibraryW Hook_LoadLibraryW(OPTI_FN_ARG method)
     {
         auto addr = LoadLibraryW_Hooked();
 
@@ -142,7 +151,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_LoadLibraryExA Hook_LoadLibraryExA(PVOID method)
+    static PFN_LoadLibraryExA Hook_LoadLibraryExA(OPTI_FN_ARG method)
     {
         auto addr = LoadLibraryExA_Hooked();
 
@@ -160,7 +169,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_LoadLibraryExW Hook_LoadLibraryExW(PVOID method)
+    static PFN_LoadLibraryExW Hook_LoadLibraryExW(OPTI_FN_ARG method)
     {
         auto addr = LoadLibraryExW_Hooked();
 
@@ -178,7 +187,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_GetProcAddress Hook_GetProcAddress(PVOID method)
+    static PFN_GetProcAddress Hook_GetProcAddress(OPTI_FN_ARG method)
     {
         auto addr = GetProcAddress_Hooked();
 
@@ -196,7 +205,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_GetModuleHandleA Hook_GetModuleHandleA(PVOID method)
+    static PFN_GetModuleHandleA Hook_GetModuleHandleA(OPTI_FN_ARG method)
     {
         auto addr = GetModuleHandleA_Hooked();
 
@@ -214,7 +223,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_GetModuleHandleW Hook_GetModuleHandleW(PVOID method)
+    static PFN_GetModuleHandleW Hook_GetModuleHandleW(OPTI_FN_ARG method)
     {
         auto addr = GetModuleHandleW_Hooked();
 
@@ -232,7 +241,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_GetModuleHandleExA Hook_GetModuleHandleExA(PVOID method)
+    static PFN_GetModuleHandleExA Hook_GetModuleHandleExA(OPTI_FN_ARG method)
     {
         auto addr = GetModuleHandleExA_Hooked();
 
@@ -250,7 +259,7 @@ class KernelBaseProxy
         return addr;
     }
 
-    static PFN_GetModuleHandleExW Hook_GetModuleHandleExW(PVOID method)
+    static PFN_GetModuleHandleExW Hook_GetModuleHandleExW(OPTI_FN_ARG method)
     {
         auto addr = GetModuleHandleExW_Hooked();
 

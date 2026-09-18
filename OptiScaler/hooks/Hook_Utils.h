@@ -18,6 +18,16 @@ template <typename Ret, typename Class, typename... Args> struct rewrite_signatu
 // For checking that the hooked function's signature matches the original
 // Place just above function definition, example of usage:
 // VALIDATE_HOOK(hkCheckFeatureSupport, PFN_CheckFeatureSupport)
+// MSVC accepts an "extern" forward declaration followed by a "static"
+// definition; Clang correctly rejects it ("static declaration follows
+// non-static declaration"). Most hooks validated here are defined static, so
+// the non-MSVC build forward-declares them with internal linkage to match.
+#ifdef _MSC_VER
 #define VALIDATE_HOOK(HookName, PfnType)                                                                               \
     extern std::remove_pointer_t<PfnType> HookName;                                                                    \
     VALIDATE_MEMBER_HOOK(HookName, PfnType)
+#else
+#define VALIDATE_HOOK(HookName, PfnType)                                                                               \
+    static std::remove_pointer_t<PfnType> HookName;                                                                    \
+    VALIDATE_MEMBER_HOOK(HookName, PfnType)
+#endif

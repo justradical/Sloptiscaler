@@ -67,7 +67,9 @@ class KernelHooks
     static inline std::mutex hookMutexBase;
 
   public:
-    static constexpr HMODULE amdxc64Mark = HMODULE(0xFFFFFFFF13372137);
+    // Not constexpr: the integer-to-pointer conversion is a reinterpret_cast,
+    // which is not permitted in a constant expression outside MSVC.
+    static inline const HMODULE amdxc64Mark = HMODULE(0xFFFFFFFF13372137);
 
     static void Hook()
     {

@@ -1,5 +1,14 @@
 #pragma once
 
+// MSVC allows an implicit function-pointer -> void* conversion; clang does
+// not. OptiFnArg (compat/arm64ec/opti_msvc_compat.h) restores it.
+#ifdef _MSC_VER
+#define OPTI_FN_ARG PVOID
+#else
+#define OPTI_FN_ARG OptiFnArg
+#endif
+
+
 #include "SysUtils.h"
 
 #include <State.h>
@@ -127,7 +136,7 @@ class D3d12Proxy
     }
 
     // Hook methods
-    static PFN_D3D12CreateDevice Hook_D3D12CreateDevice(PVOID method)
+    static PFN_D3D12CreateDevice Hook_D3D12CreateDevice(OPTI_FN_ARG method)
     {
         auto addr = D3D12CreateDevice_ForHook();
 
@@ -145,7 +154,7 @@ class D3d12Proxy
         return addr;
     }
 
-    static PFN_D3D12SerializeRootSignature Hook_D3D12SerializeRootSignature(PVOID method)
+    static PFN_D3D12SerializeRootSignature Hook_D3D12SerializeRootSignature(OPTI_FN_ARG method)
     {
         auto addr = D3D12SerializeRootSignature_ForHook();
 
@@ -163,7 +172,7 @@ class D3d12Proxy
         return addr;
     }
 
-    static PFN_D3D12CreateRootSignatureDeserializer Hook_D3D12CreateRootSignatureDeserializer(PVOID method)
+    static PFN_D3D12CreateRootSignatureDeserializer Hook_D3D12CreateRootSignatureDeserializer(OPTI_FN_ARG method)
     {
         auto addr = D3D12CreateRootSignatureDeserializer_ForHook();
 
@@ -181,7 +190,7 @@ class D3d12Proxy
         return addr;
     }
 
-    static PFN_D3D12SerializeVersionedRootSignature Hook_D3D12SerializeVersionedRootSignature(PVOID method)
+    static PFN_D3D12SerializeVersionedRootSignature Hook_D3D12SerializeVersionedRootSignature(OPTI_FN_ARG method)
     {
         auto addr = D3D12SerializeVersionedRootSignature_ForHook();
 
@@ -200,7 +209,7 @@ class D3d12Proxy
     }
 
     static PFN_D3D12CreateVersionedRootSignatureDeserializer
-    Hook_D3D12CreateVersionedRootSignatureDeserializer(PVOID method)
+    Hook_D3D12CreateVersionedRootSignatureDeserializer(OPTI_FN_ARG method)
     {
         auto addr = D3D12CreateVersionedRootSignatureDeserializer_ForHook();
 
@@ -218,7 +227,7 @@ class D3d12Proxy
         return addr;
     }
 
-    static PFN_D3D12GetDebugInterface Hook_D3D12GetDebugInterface(PVOID method)
+    static PFN_D3D12GetDebugInterface Hook_D3D12GetDebugInterface(OPTI_FN_ARG method)
     {
         auto addr = D3D12GetDebugInterface_ForHook();
 
@@ -236,7 +245,7 @@ class D3d12Proxy
         return addr;
     }
 
-    static PFN_D3D12EnableExperimentalFeatures Hook_D3D12EnableExperimentalFeatures(PVOID method)
+    static PFN_D3D12EnableExperimentalFeatures Hook_D3D12EnableExperimentalFeatures(OPTI_FN_ARG method)
     {
         auto addr = D3D12EnableExperimentalFeatures_ForHook();
 
@@ -254,7 +263,7 @@ class D3d12Proxy
         return addr;
     }
 
-    static PFN_D3D12GetInterface Hook_D3D12GetInterface(PVOID method)
+    static PFN_D3D12GetInterface Hook_D3D12GetInterface(OPTI_FN_ARG method)
     {
         auto addr = D3D12GetInterface_ForHook();
 

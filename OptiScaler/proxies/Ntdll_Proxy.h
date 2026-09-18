@@ -1,5 +1,14 @@
 #pragma once
 
+// MSVC allows an implicit function-pointer -> void* conversion; clang does
+// not. OptiFnArg (compat/arm64ec/opti_msvc_compat.h) restores it.
+#ifdef _MSC_VER
+#define OPTI_FN_ARG PVOID
+#else
+#define OPTI_FN_ARG OptiFnArg
+#endif
+
+
 #include "SysUtils.h"
 
 #include <detours/detours.h>
@@ -97,7 +106,7 @@ class NtdllProxy
 
     static HMODULE Module() { return _dll; }
 
-    static PFN_RtlGetVersion Hook_RtlGetVersion(PVOID method)
+    static PFN_RtlGetVersion Hook_RtlGetVersion(OPTI_FN_ARG method)
     {
         auto addr = o_RtlGetVersion;
 
@@ -110,7 +119,7 @@ class NtdllProxy
         return addr;
     }
 
-    static PFN_LdrLoadDll Hook_LdrLoadDll(PVOID method)
+    static PFN_LdrLoadDll Hook_LdrLoadDll(OPTI_FN_ARG method)
     {
         auto addr = o_LdrLoadDll;
 
@@ -128,7 +137,7 @@ class NtdllProxy
         return addr;
     }
 
-    static PFN_LdrUnloadDll Hook_LdrUnloadDll(PVOID method)
+    static PFN_LdrUnloadDll Hook_LdrUnloadDll(OPTI_FN_ARG method)
     {
         auto addr = o_LdrUnloadDll;
 
@@ -146,7 +155,7 @@ class NtdllProxy
         return addr;
     }
 
-    static PFN_NtLoadDll Hook_NtLoadDll(PVOID method)
+    static PFN_NtLoadDll Hook_NtLoadDll(OPTI_FN_ARG method)
     {
         auto addr = o_NtLoadDll;
 
