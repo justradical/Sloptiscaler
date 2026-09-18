@@ -392,10 +392,45 @@ bool SGSR2FeatureDx12::InitInternal(ID3D12GraphicsCommandList* InCommandList, NV
     if (IsInited())
         return true;
 
-    Device = State::Instance().currentD3D12Device;
+    // IFeature_Dx12::Init has already set Device from the caller; do not re-fetch
+    // it from State, whose currentD3D12Device is cleared when a device is released.
     if (Device == nullptr)
     {
         LOG_ERROR("No D3D12 device");
+        return false;
+    }
+
+    // Target size is the backend's responsibility -- it is still zero here.
+    // Output scaling renders at a multiple of display size and downsamples later.
+    if (Config::Instance()->OutputScalingEnabled.value_or_default() &&
+        (LowResMV() || RenderWidth() == DisplayWidth()))
+    {
+        float ssMulti = Config::Instance()->OutputScalingMultiplier.value_or_default();
+
+        if (ssMulti < 0.5f)
+        {
+            ssMulti = 0.5f;
+            Config::Instance()->OutputScalingMultiplier.set_volatile_value(ssMulti);
+        }
+        else if (ssMulti > 3.0f)
+        {
+            ssMulti = 3.0f;
+            Config::Instance()->OutputScalingMultiplier.set_volatile_value(ssMulti);
+        }
+
+        _targetWidth = static_cast<unsigned int>(DisplayWidth() * ssMulti);
+        _targetHeight = static_cast<unsigned int>(DisplayHeight() * ssMulti);
+    }
+    else
+    {
+        _targetWidth = DisplayWidth();
+        _targetHeight = DisplayHeight();
+    }
+
+    if (RenderWidth() == 0 || RenderHeight() == 0 || TargetWidth() == 0 || TargetHeight() == 0)
+    {
+        LOG_ERROR("Invalid dimensions {0}x{1} -> {2}x{3}", RenderWidth(), RenderHeight(), TargetWidth(),
+                  TargetHeight());
         return false;
     }
 
