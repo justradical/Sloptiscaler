@@ -63,5 +63,7 @@
 #endif
 
 #include "opti_sal_params.h"
+#include "opti_msvc_compat.h"
+#include "opti_atomic_compat.h"
 
 #endif /* OPTISCALER_COMPAT_SAL_H */
