@@ -69,7 +69,7 @@
 //////////////////////////////////////////////////////////////////////////////
 //
 
-#if (_MSC_VER < 1299)
+#if defined(_MSC_VER) && (_MSC_VER < 1299)
 typedef LONG LONG_PTR;
 typedef ULONG ULONG_PTR;
 #endif
@@ -471,6 +471,34 @@ extern "C"
 
     LONG WINAPI DetourDetach(_Inout_ PVOID* ppPointer, _In_ PVOID pDetour);
 
+#if defined(__cplusplus) && !defined(_MSC_VER)
+}   // extern "C" -- overloads below must have C++ linkage.
+
+// MSVC implicitly converts a function pointer to void* as a language
+// extension; Clang/GCC (ARM64EC / mingw-w64 build) reject it. OptiScaler calls
+// DetourAttach/DetourDetach with a bare hook function as the second argument
+// ~375 times, so restore the conversion here rather than casting every site.
+#include <type_traits>
+
+template <class T, class = typename std::enable_if<
+                       std::is_pointer<T>::value &&
+                       std::is_function<typename std::remove_pointer<T>::type>::value>::type>
+inline LONG DetourAttach(PVOID* ppPointer, T pDetour)
+{
+    return DetourAttach(ppPointer, reinterpret_cast<PVOID>(pDetour));
+}
+
+template <class T, class = typename std::enable_if<
+                       std::is_pointer<T>::value &&
+                       std::is_function<typename std::remove_pointer<T>::type>::value>::type>
+inline LONG DetourDetach(PVOID* ppPointer, T pDetour)
+{
+    return DetourDetach(ppPointer, reinterpret_cast<PVOID>(pDetour));
+}
+
+extern "C" {
+#endif
+
     BOOL WINAPI DetourSetIgnoreTooSmall(_In_ BOOL fIgnore);
     BOOL WINAPI DetourSetRetainRegions(_In_ BOOL fRetain);
     PVOID WINAPI DetourSetSystemRegionLowerBound(_In_ PVOID pSystemRegionLowerBound);
@@ -677,7 +705,7 @@ extern "C"
 
 //////////////////////////////////////////////////////////////////////////////
 //
-#if (_MSC_VER < 1299)
+#if defined(_MSC_VER) && (_MSC_VER < 1299)
 #include <imagehlp.h>
 typedef IMAGEHLP_MODULE IMAGEHLP_MODULE64;
 typedef PIMAGEHLP_MODULE PIMAGEHLP_MODULE64;
