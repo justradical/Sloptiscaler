@@ -811,7 +811,7 @@ void FSRFG_Dx12::DestroyFGContext()
 {
     _frameCount = 1;
     // _lastDispatchedFrame = 0;
-    _version = {};
+    _version = feature_version {}; // "= {}" is ambiguous for clang between copy- and move-assign
 
     LOG_DEBUG("");
 

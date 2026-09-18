@@ -11,7 +11,7 @@
 class LowLatency
 {
   private:
-    std::atomic<std::shared_ptr<LowLatencyTech>> currently_active_tech;
+    OptiAtomicSharedPtr<LowLatencyTech> currently_active_tech;
     FrameReport frame_reports[FRAME_REPORTS_BUFFER_SIZE] {};
     std::optional<bool> forced_fg;
     bool fg;

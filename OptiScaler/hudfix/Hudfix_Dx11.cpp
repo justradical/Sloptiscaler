@@ -783,7 +783,9 @@ void Hudfix_Dx11::ReleaseResources()
     auto& capturedHudlesses = State::Instance().capturedHudlesses;
     for (const auto& [resource, identity] : _capturedIdentity)
     {
-        UNREFERENCED_PARAMETER(identity);
+        // mingw defines UNREFERENCED_PARAMETER(P) as {(P) = (P);}, which cannot
+        // assign to this const structured binding. MSVC expands it to just (P).
+        (void) identity;
         capturedHudlesses.erase(resource);
     }
     _capturedIdentity.clear();

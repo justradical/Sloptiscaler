@@ -243,12 +243,12 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
         if (InterfaceId == GET_ID(NvAPI_GPU_GetArchInfo))
         {
             o_NvAPI_GPU_GetArchInfo = reinterpret_cast<decltype(&NvAPI_GPU_GetArchInfo)>(functionPointer);
-            return &hkNvAPI_GPU_GetArchInfo;
+            return (void*) &hkNvAPI_GPU_GetArchInfo;
         }
         if (InterfaceId == GET_ID(NvAPI_DRS_GetSetting))
         {
             o_NvAPI_DRS_GetSetting = reinterpret_cast<decltype(&NvAPI_DRS_GetSetting)>(functionPointer);
-            return &hkNvAPI_DRS_GetSetting;
+            return (void*) &hkNvAPI_DRS_GetSetting;
         }
     }
 

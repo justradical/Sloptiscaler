@@ -1,3 +1,4 @@
+#include "opti_d3d12_agility.h"
 #include "pch.h"
 #include "D3D12_Hooks.h"
 
@@ -1681,11 +1682,11 @@ static HRESULT hkD3D12SerializeVersionedRootSignature(const D3D12_VERSIONED_ROOT
     }
     else if (pRootSignature->Version == D3D_ROOT_SIGNATURE_VERSION_1_2)
     {
-        if (pRootSignature->Desc_1_2.NumStaticSamplers > 0)
+        if (OptiDesc_1_2(*pRootSignature).NumStaticSamplers > 0)
         {
-            localSamplers1.assign(pRootSignature->Desc_1_2.pStaticSamplers,
-                                  pRootSignature->Desc_1_2.pStaticSamplers +
-                                      pRootSignature->Desc_1_2.NumStaticSamplers);
+            localSamplers1.assign(OptiDesc_1_2(*pRootSignature).pStaticSamplers,
+                                  OptiDesc_1_2(*pRootSignature).pStaticSamplers +
+                                      OptiDesc_1_2(*pRootSignature).NumStaticSamplers);
         }
 
         for (auto& sampler : localSamplers1)
@@ -1693,7 +1694,7 @@ static HRESULT hkD3D12SerializeVersionedRootSignature(const D3D12_VERSIONED_ROOT
             ApplySamplerOverrides(sampler);
         }
 
-        localVersionedRootSignature.Desc_1_2.pStaticSamplers = localSamplers1.data();
+        OptiDesc_1_2(localVersionedRootSignature).pStaticSamplers = localSamplers1.data();
     }
 
     auto result = o_D3D12SerializeVersionedRootSignature(&localVersionedRootSignature, ppBlob, ppErrorBlob);
@@ -1977,7 +1978,7 @@ static HRESULT hkCreateRootSignature(ID3D12Device* device, UINT nodeMask, const 
             else if (desc->Version == D3D_ROOT_SIGNATURE_VERSION_1_2)
             {
                 rootSigParameterCount.insert_or_assign((ID3D12RootSignature*) *ppvRootSignature,
-                                                       desc->Desc_1_2.NumParameters);
+                                                       OptiDesc_1_2(*desc).NumParameters);
             }
         }
 
@@ -2036,18 +2037,18 @@ static HRESULT hkCreateRootSignature(ID3D12Device* device, UINT nodeMask, const 
         {
             std::unique_lock<std::shared_mutex> lock(rootSigParameterCountMutex);
             rootSigParameterCount.insert_or_assign((ID3D12RootSignature*) *ppvRootSignature,
-                                                   desc->Desc_1_2.NumParameters);
+                                                   OptiDesc_1_2(*desc).NumParameters);
         }
 
-        if (descCopy.Desc_1_2.NumStaticSamplers > 0)
+        if (OptiDesc_1_2(descCopy).NumStaticSamplers > 0)
         {
-            samplers1.assign(descCopy.Desc_1_2.pStaticSamplers,
-                             descCopy.Desc_1_2.pStaticSamplers + descCopy.Desc_1_2.NumStaticSamplers);
+            samplers1.assign(OptiDesc_1_2(descCopy).pStaticSamplers,
+                             OptiDesc_1_2(descCopy).pStaticSamplers + OptiDesc_1_2(descCopy).NumStaticSamplers);
 
             for (auto& s : samplers1)
                 ApplySamplerOverrides(s);
 
-            descCopy.Desc_1_2.pStaticSamplers = samplers1.data();
+            OptiDesc_1_2(descCopy).pStaticSamplers = samplers1.data();
         }
     }
 

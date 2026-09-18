@@ -1,3 +1,9 @@
+// These are file-local ("exe input") variants that deliberately shadow the
+// non-static ffx*_Dx12 entry points declared in FfxApi_Dx12.h. Defining them
+// static after that header has declared them with external linkage is
+// ill-formed for clang ("static declaration follows non-static declaration");
+// MSVC merely tolerates it. They are only referenced inside this file (the
+// header exposes just HookFfxExeInputs), so they are renamed instead.
 #include "pch.h"
 #include "FfxApi_Dx12.h"
 #include "Config.h"
@@ -160,7 +166,7 @@ static std::optional<float> GetQualityOverrideRatioFfx(const uint32_t input)
     return output;
 }
 
-static ffxReturnCode_t ffxCreateContext_Dx12(ffxContext* context, ffxCreateContextDescHeader* desc,
+static ffxReturnCode_t exe_ffxCreateContext_Dx12(ffxContext* context, ffxCreateContextDescHeader* desc,
                                              const ffxAllocationCallbacks* memCb)
 {
     if (desc == nullptr)
@@ -233,7 +239,7 @@ static ffxReturnCode_t ffxCreateContext_Dx12(ffxContext* context, ffxCreateConte
     return FFX_API_RETURN_OK;
 }
 
-static ffxReturnCode_t ffxDestroyContext_Dx12(ffxContext* context, const ffxAllocationCallbacks* memCb)
+static ffxReturnCode_t exe_ffxDestroyContext_Dx12(ffxContext* context, const ffxAllocationCallbacks* memCb)
 {
     if (context == nullptr)
         return FFX_API_RETURN_ERROR_PARAMETER;
@@ -253,7 +259,7 @@ static ffxReturnCode_t ffxDestroyContext_Dx12(ffxContext* context, const ffxAllo
     return FFX_API_RETURN_OK;
 }
 
-static ffxReturnCode_t ffxConfigure_Dx12(ffxContext* context, ffxConfigureDescHeader* desc)
+static ffxReturnCode_t exe_ffxConfigure_Dx12(ffxContext* context, ffxConfigureDescHeader* desc)
 {
     if (desc == nullptr)
         return FFX_API_RETURN_ERROR_PARAMETER;
@@ -266,7 +272,7 @@ static ffxReturnCode_t ffxConfigure_Dx12(ffxContext* context, ffxConfigureDescHe
     return _D3D12_Configure(context, desc);
 }
 
-static ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
+static ffxReturnCode_t exe_ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
 {
     if (desc == nullptr)
         return FFX_API_RETURN_ERROR_PARAMETER;
@@ -306,7 +312,7 @@ static ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* de
     return _D3D12_Query(context, desc);
 }
 
-static ffxReturnCode_t ffxDispatch_Dx12(ffxContext* context, ffxDispatchDescHeader* desc)
+static ffxReturnCode_t exe_ffxDispatch_Dx12(ffxContext* context, ffxDispatchDescHeader* desc)
 {
     // Skip OptiScaler stuff
     if (!Config::Instance()->UseFfxInputs.value_or_default())
@@ -419,32 +425,32 @@ void HookFfxExeInputs()
 
         if (_D3D12_Configure != nullptr)
         {
-            LOG_DEBUG("ffxConfigure_Dx12: {:X}", (size_t) _D3D12_Configure);
-            DetourAttach(&(PVOID&) _D3D12_Configure, ffxConfigure_Dx12);
+            LOG_DEBUG("exe_ffxConfigure_Dx12: {:X}", (size_t) _D3D12_Configure);
+            DetourAttach(&(PVOID&) _D3D12_Configure, exe_ffxConfigure_Dx12);
         }
 
         if (_D3D12_CreateContext != nullptr)
         {
-            LOG_DEBUG("ffxCreateContext_Dx12: {:X}", (size_t) _D3D12_CreateContext);
-            DetourAttach(&(PVOID&) _D3D12_CreateContext, ffxCreateContext_Dx12);
+            LOG_DEBUG("exe_ffxCreateContext_Dx12: {:X}", (size_t) _D3D12_CreateContext);
+            DetourAttach(&(PVOID&) _D3D12_CreateContext, exe_ffxCreateContext_Dx12);
         }
 
         if (_D3D12_DestroyContext != nullptr)
         {
-            LOG_DEBUG("ffxDestroyContext_Dx12: {:X}", (size_t) _D3D12_DestroyContext);
-            DetourAttach(&(PVOID&) _D3D12_DestroyContext, ffxDestroyContext_Dx12);
+            LOG_DEBUG("exe_ffxDestroyContext_Dx12: {:X}", (size_t) _D3D12_DestroyContext);
+            DetourAttach(&(PVOID&) _D3D12_DestroyContext, exe_ffxDestroyContext_Dx12);
         }
 
         if (_D3D12_Dispatch != nullptr)
         {
-            LOG_DEBUG("ffxDispatch_Dx12: {:X}", (size_t) _D3D12_Dispatch);
-            DetourAttach(&(PVOID&) _D3D12_Dispatch, ffxDispatch_Dx12);
+            LOG_DEBUG("exe_ffxDispatch_Dx12: {:X}", (size_t) _D3D12_Dispatch);
+            DetourAttach(&(PVOID&) _D3D12_Dispatch, exe_ffxDispatch_Dx12);
         }
 
         if (_D3D12_Query != nullptr)
         {
-            LOG_DEBUG("ffxQuery_Dx12: {:X}", (size_t) _D3D12_Query);
-            DetourAttach(&(PVOID&) _D3D12_Query, ffxQuery_Dx12);
+            LOG_DEBUG("exe_ffxQuery_Dx12: {:X}", (size_t) _D3D12_Query);
+            DetourAttach(&(PVOID&) _D3D12_Query, exe_ffxQuery_Dx12);
         }
 
         auto detourResult = DetourTransactionCommit();

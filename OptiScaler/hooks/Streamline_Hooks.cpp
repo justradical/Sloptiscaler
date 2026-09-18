@@ -328,14 +328,14 @@ sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const ch
     {
         if (strcmp(functionName, "slDLSSGSetOptions") == 0)
         {
-            function = &dummy_slDLSSGSetOptions;
+            function = (void*) &dummy_slDLSSGSetOptions;
 
             return sl::Result::eOk;
         }
 
         if (strcmp(functionName, "slDLSSGGetState") == 0)
         {
-            function = &dummy_slDLSSGGetState;
+            function = (void*) &dummy_slDLSSGGetState;
 
             return sl::Result::eOk;
         }
@@ -1371,14 +1371,14 @@ void* StreamlineHooks::hkdlss_slGetPluginFunction(const char* functionName)
     if (strcmp(functionName, "slOnPluginLoad") == 0)
     {
         o_dlss_slOnPluginLoad = (PFN_slOnPluginLoad) o_dlss_slGetPluginFunction(functionName);
-        return &hkdlss_slOnPluginLoad;
+        return (void*) &hkdlss_slOnPluginLoad;
     }
 
     if (strcmp(functionName, "slDLSSGetOptimalSettings") == 0 &&
         State::Instance().gameQuirks & GameQuirk::PregmataFixDLSSModes)
     {
         o_slDLSSGetOptimalSettings = (decltype(&slDLSSGetOptimalSettings)) o_dlss_slGetPluginFunction(functionName);
-        return &hkslDLSSGetOptimalSettings;
+        return (void*) &hkslDLSSGetOptimalSettings;
     }
 
     return o_dlss_slGetPluginFunction(functionName);
@@ -1391,7 +1391,7 @@ void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
     if (strcmp(functionName, "slOnPluginLoad") == 0)
     {
         o_dlssg_slOnPluginLoad = (PFN_slOnPluginLoad) o_dlssg_slGetPluginFunction(functionName);
-        return &hkdlssg_slOnPluginLoad;
+        return (void*) &hkdlssg_slOnPluginLoad;
     }
 
     if (strcmp(functionName, "slDLSSGSetOptions") == 0)
@@ -1403,10 +1403,10 @@ void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
         if (steamOverlay != nullptr)
         {
             if (HMODULE callerModule = Util::GetCallerModule(_ReturnAddress()); callerModule == steamOverlay)
-                return o_slDLSSGSetOptions;
+                return (void*) o_slDLSSGSetOptions;
         }
 
-        return &hkslDLSSGSetOptions;
+        return (void*) &hkslDLSSGSetOptions;
     }
 
     if (strcmp(functionName, "slDLSSGGetState") == 0)
@@ -1418,10 +1418,10 @@ void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
         if (steamOverlay != nullptr)
         {
             if (HMODULE callerModule = Util::GetCallerModule(_ReturnAddress()); callerModule == steamOverlay)
-                return o_slDLSSGGetState;
+                return (void*) o_slDLSSGGetState;
         }
 
-        return &hkslDLSSGGetState;
+        return (void*) &hkslDLSSGGetState;
     }
 
     if (strcmp(functionName, "slGetPluginJSONConfig") == 0 && IsSL1AndDLSSGActive())
@@ -1432,7 +1432,7 @@ void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
         if (o_dlssg_slGetPluginJSONConfig_sl1 != nullptr)
         {
             LOG_WARN("Hooking SL1 DLSSG slGetPluginJSONConfig");
-            return &hkdlssg_slGetPluginJSONConfig_sl1;
+            return (void*) &hkdlssg_slGetPluginJSONConfig_sl1;
         }
     }
 
@@ -1453,7 +1453,7 @@ void* StreamlineHooks::hklocal_dlssg_slGetPluginFunction(const char* functionNam
     if (strcmp(functionName, "slOnPluginLoad") == 0 && State::Instance().activeFgNvngx != FGNvngxReplacement::None)
     {
         o_local_dlssg_slOnPluginLoad = (PFN_slOnPluginLoad) o_local_dlssg_slGetPluginFunction(functionName);
-        return &hklocal_dlssg_slOnPluginLoad;
+        return (void*) &hklocal_dlssg_slOnPluginLoad;
     }
 
     return o_local_dlssg_slGetPluginFunction(functionName);
@@ -1486,25 +1486,25 @@ void* StreamlineHooks::hkreflex_slGetPluginFunction(const char* functionName)
     if (strcmp(functionName, "slSetConstants") == 0 && State::Instance().streamlineVersion.major == 1)
     {
         o_reflex_slSetConstants_sl1 = (PFN_slSetConstants_sl1) o_reflex_slGetPluginFunction(functionName);
-        return &hkreflex_slSetConstants_sl1;
+        return (void*) &hkreflex_slSetConstants_sl1;
     }
 
     if (strcmp(functionName, "slOnPluginLoad") == 0)
     {
         o_reflex_slOnPluginLoad = (PFN_slOnPluginLoad) o_reflex_slGetPluginFunction(functionName);
-        return &hkreflex_slOnPluginLoad;
+        return (void*) &hkreflex_slOnPluginLoad;
     }
 
     if (strcmp(functionName, "slReflexSetOptions") == 0)
     {
         o_slReflexSetOptions = (decltype(&slReflexSetOptions)) o_reflex_slGetPluginFunction(functionName);
-        return &hkslReflexSetOptions;
+        return (void*) &hkslReflexSetOptions;
     }
 
     if (strcmp(functionName, "slReflexSleep") == 0)
     {
         o_slReflexSleep = (decltype(&slReflexSleep)) o_reflex_slGetPluginFunction(functionName);
-        return &hkslReflexSleep;
+        return (void*) &hkslReflexSleep;
     }
 
     // TODO: Hopefully a game doesn't call both, maybe separate
@@ -1513,7 +1513,7 @@ void* StreamlineHooks::hkreflex_slGetPluginFunction(const char* functionName)
          State::Instance().activeFgInput == FGInput::DLSSG))
     {
         o_slPCLSetMarker = (decltype(&slPCLSetMarker)) o_reflex_slGetPluginFunction(functionName);
-        return &hkslPCLSetMarker;
+        return (void*) &hkslPCLSetMarker;
     }
 
     return o_reflex_slGetPluginFunction(functionName);
@@ -1610,13 +1610,13 @@ void* StreamlineHooks::hkpcl_slGetPluginFunction(const char* functionName)
          State::Instance().activeFgInput == FGInput::DLSSG))
     {
         o_slPCLSetMarker = (decltype(&slPCLSetMarker)) o_pcl_slGetPluginFunction(functionName);
-        return &hkslPCLSetMarker;
+        return (void*) &hkslPCLSetMarker;
     }
 
     if (strcmp(functionName, "slOnPluginLoad") == 0)
     {
         o_pcl_slOnPluginLoad = (PFN_slOnPluginLoad) o_pcl_slGetPluginFunction(functionName);
-        return &hkpcl_slOnPluginLoad;
+        return (void*) &hkpcl_slOnPluginLoad;
     }
 
     return o_pcl_slGetPluginFunction(functionName);
@@ -1683,14 +1683,14 @@ void* StreamlineHooks::hkcommon_slGetPluginFunction(const char* functionName)
     if (strcmp(functionName, "slOnPluginLoad") == 0)
     {
         o_common_slOnPluginLoad = (PFN_slOnPluginLoad) o_common_slGetPluginFunction(functionName);
-        return &hkcommon_slOnPluginLoad;
+        return (void*) &hkcommon_slOnPluginLoad;
     }
 
     // Used around Streamline v1.3, as 1.5 doesn't seem to have it anymore
     if (strcmp(functionName, "slSetParameters") == 0)
     {
         o_common_slSetParameters_sl1 = (PFN_slSetParameters_sl1) o_common_slGetPluginFunction(functionName);
-        return &hkcommon_slSetParameters_sl1;
+        return (void*) &hkcommon_slSetParameters_sl1;
     }
 
     return o_common_slGetPluginFunction(functionName);

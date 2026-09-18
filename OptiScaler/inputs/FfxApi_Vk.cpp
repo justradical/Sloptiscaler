@@ -577,14 +577,14 @@ ffxReturnCode_t ffxQuery_Vk(ffxContext* context, ffxQueryDescHeader* desc)
             ver = FfxApiProxy::VersionVk();
 
             providerDesc->versionId =
-                0xF600'0000ui64 << 32u << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
+                0xF600'0000ULL << 32u << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
         }
         else if (type == FFXStructType::Upscaling)
         {
             ver = FfxApiProxy::VersionVk();
 
             providerDesc->versionId =
-                0xF5A5'CA1Eui64 << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
+                0xF5A5'CA1EULL << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
         }
         else
         {

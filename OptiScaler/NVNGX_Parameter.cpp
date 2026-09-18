@@ -723,9 +723,9 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
     InParams->Set(NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult, 1);
     InParams->Set(NVSDK_NGX_Parameter_OptLevel, 0);
     InParams->Set(NVSDK_NGX_Parameter_IsDevSnippetBranch, 0);
-    InParams->Set(NVSDK_NGX_Parameter_DLSSOptimalSettingsCallback, NVSDK_NGX_DLSS_GetOptimalSettingsCallback);
-    InParams->Set("DLSSDOptimalSettingsCallback", NVSDK_NGX_DLSSD_GetOptimalSettingsCallback);
-    InParams->Set(NVSDK_NGX_Parameter_DLSSGetStatsCallback, NVSDK_NGX_DLSS_GetStatsCallback);
+    InParams->Set(NVSDK_NGX_Parameter_DLSSOptimalSettingsCallback, (void*) &NVSDK_NGX_DLSS_GetOptimalSettingsCallback);
+    InParams->Set("DLSSDOptimalSettingsCallback", (void*) &NVSDK_NGX_DLSSD_GetOptimalSettingsCallback);
+    InParams->Set(NVSDK_NGX_Parameter_DLSSGetStatsCallback, (void*) &NVSDK_NGX_DLSS_GetStatsCallback);
     InParams->Set(NVSDK_NGX_Parameter_Sharpness, 0.0f);
     InParams->Set(NVSDK_NGX_Parameter_MV_Scale_X, 1.0f);
     InParams->Set(NVSDK_NGX_Parameter_MV_Scale_Y, 1.0f);
@@ -739,7 +739,7 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
     InParams->Set(NVSDK_NGX_EParameter_OptLevel, 0);
     InParams->Set(NVSDK_NGX_Parameter_FreeMemOnReleaseFeature, 0);
     InParams->Set(NVSDK_NGX_EParameter_IsDevSnippetBranch, 0);
-    InParams->Set(NVSDK_NGX_EParameter_DLSSOptimalSettingsCallback, NVSDK_NGX_DLSS_GetOptimalSettingsCallback);
+    InParams->Set(NVSDK_NGX_EParameter_DLSSOptimalSettingsCallback, (void*) &NVSDK_NGX_DLSS_GetOptimalSettingsCallback);
     InParams->Set(NVSDK_NGX_EParameter_Sharpness, 0.0f);
     InParams->Set(NVSDK_NGX_EParameter_MV_Scale_X, 1.0f);
     InParams->Set(NVSDK_NGX_EParameter_MV_Scale_Y, 1.0f);

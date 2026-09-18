@@ -630,7 +630,7 @@ void UpdateDirectInputIntegration()
     if (module8 != nullptr)
     {
         if (!InstallDirectInputExportHook(module8, DirectInput8CreateExportName,
-                                          reinterpret_cast<void**>(&o_DirectInput8Create), hkDirectInput8Create,
+                                          reinterpret_cast<void**>(&o_DirectInput8Create), (void*) hkDirectInput8Create,
                                           &_state.DirectInput8CreateHookInstalled))
         {
             std::unique_lock lock(_state.Mutex);
@@ -645,15 +645,15 @@ void UpdateDirectInputIntegration()
     if (legacyModule != nullptr)
     {
         InstallDirectInputExportHook(legacyModule, DirectInputCreateAExportName,
-                                     reinterpret_cast<void**>(&o_DirectInputCreateA), hkDirectInputCreateA,
+                                     reinterpret_cast<void**>(&o_DirectInputCreateA), (void*) hkDirectInputCreateA,
                                      &_state.DirectInputCreateAHookInstalled);
 
         InstallDirectInputExportHook(legacyModule, DirectInputCreateWExportName,
-                                     reinterpret_cast<void**>(&o_DirectInputCreateW), hkDirectInputCreateW,
+                                     reinterpret_cast<void**>(&o_DirectInputCreateW), (void*) hkDirectInputCreateW,
                                      &_state.DirectInputCreateWHookInstalled);
 
         InstallDirectInputExportHook(legacyModule, DirectInputCreateExExportName,
-                                     reinterpret_cast<void**>(&o_DirectInputCreateEx), hkDirectInputCreateEx,
+                                     reinterpret_cast<void**>(&o_DirectInputCreateEx), (void*) hkDirectInputCreateEx,
                                      &_state.DirectInputCreateExHookInstalled);
     }
 }

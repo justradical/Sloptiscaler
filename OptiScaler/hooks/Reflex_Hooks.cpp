@@ -432,35 +432,35 @@ void* ReflexHooks::getHookedReflex(unsigned int InterfaceId)
 {
     if (InterfaceId == GET_ID(NvAPI_D3D_SetSleepMode) && o_NvAPI_D3D_SetSleepMode)
     {
-        return &hkNvAPI_D3D_SetSleepMode;
+        return (void*) &hkNvAPI_D3D_SetSleepMode;
     }
     if (InterfaceId == GET_ID(NvAPI_D3D_Sleep) && o_NvAPI_D3D_Sleep)
     {
-        return &hkNvAPI_D3D_Sleep;
+        return (void*) &hkNvAPI_D3D_Sleep;
     }
     if (InterfaceId == GET_ID(NvAPI_D3D_GetLatency) && o_NvAPI_D3D_GetLatency)
     {
-        return &hkNvAPI_D3D_GetLatency;
+        return (void*) &hkNvAPI_D3D_GetLatency;
     }
     if (InterfaceId == GET_ID(NvAPI_D3D_SetLatencyMarker) && o_NvAPI_D3D_SetLatencyMarker)
     {
-        return &hkNvAPI_D3D_SetLatencyMarker;
+        return (void*) &hkNvAPI_D3D_SetLatencyMarker;
     }
     if (InterfaceId == GET_ID(NvAPI_D3D12_SetAsyncFrameMarker) && o_NvAPI_D3D12_SetAsyncFrameMarker)
     {
-        return &hkNvAPI_D3D12_SetAsyncFrameMarker;
+        return (void*) &hkNvAPI_D3D12_SetAsyncFrameMarker;
     }
     if (InterfaceId == GET_ID(NvAPI_Vulkan_SetLatencyMarker) && o_NvAPI_Vulkan_SetLatencyMarker)
     {
-        return &hkNvAPI_Vulkan_SetLatencyMarker;
+        return (void*) &hkNvAPI_Vulkan_SetLatencyMarker;
     }
     if (InterfaceId == GET_ID(NvAPI_Vulkan_SetSleepMode) && o_NvAPI_Vulkan_SetSleepMode)
     {
-        return &hkNvAPI_Vulkan_SetSleepMode;
+        return (void*) &hkNvAPI_Vulkan_SetSleepMode;
     }
     if (InterfaceId == GET_ID(NvAPI_Vulkan_GetLatency) && o_NvAPI_Vulkan_GetLatency)
     {
-        return &hkNvAPI_Vulkan_GetLatency;
+        return (void*) &hkNvAPI_Vulkan_GetLatency;
     }
 
     return nullptr;

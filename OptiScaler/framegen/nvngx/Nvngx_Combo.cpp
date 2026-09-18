@@ -278,8 +278,8 @@ NVSDK_NGX_Result Nvngx_Combo::D3D12_PopulateParameters_Impl(NVSDK_NGX_Parameter*
     if (!InParameters)
         return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
-    InParameters->Set("DLSSG.GetCurrentSettingsCallback", &GetCurrentSettingsCallback);
-    InParameters->Set("DLSSG.EstimateVRAMCallback", &EstimateVRAMCallback);
+    InParameters->Set("DLSSG.GetCurrentSettingsCallback", (void*) &GetCurrentSettingsCallback);
+    InParameters->Set("DLSSG.EstimateVRAMCallback", (void*) &EstimateVRAMCallback);
 
     // if (inited) // Query FFX
     InParameters->Set("DLSSG.MultiFrameCountMax", 1);

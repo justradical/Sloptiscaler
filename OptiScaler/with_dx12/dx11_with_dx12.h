@@ -118,7 +118,12 @@ class Dx11WithDx12
         UINT64 frameId = 0;
     };
 
-    inline static D3D11_UPSCALER_RESOURCE_CACHE_C UpscalerResourceCache = {};
+    // Declared here, defined just after the class. A nested type's default
+    // member initializers only become usable once the enclosing class is
+    // complete, so initialising this inside Dx11WithDx12 is ill-formed
+    // ("default member initializer for 'Color' needed within definition of
+    // enclosing class"). MSVC accepts it; clang correctly does not.
+    static D3D11_UPSCALER_RESOURCE_CACHE_C UpscalerResourceCache;
     inline static UINT UpscalerFrameIndex = 0;
     inline static UINT64 UpscalerLocalFrameId = 0;
     inline static UINT64 LastPreparedUpscalerFrameId = 0;
@@ -171,6 +176,8 @@ class Dx11WithDx12
     static void Init(ID3D11Device* dx11Device, ID3D11DeviceContext* dx11Context, ID3D12Device* dx12Device,
                      ID3D12CommandQueue* dx12CommandQueue);
 };
+
+inline Dx11WithDx12::D3D11_UPSCALER_RESOURCE_CACHE_C Dx11WithDx12::UpscalerResourceCache = {};
 
 inline Dx11WithDx12::ResourceMask operator|(Dx11WithDx12::ResourceMask a, Dx11WithDx12::ResourceMask b)
 {

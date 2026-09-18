@@ -478,28 +478,28 @@ ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
             ver = FfxApiProxy::VersionDx12_FG();
 
             providerDesc->versionId =
-                0xF600'0000ui64 << 32u << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
+                0xF600'0000ULL << 32u << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
         }
         else if (type == FFXStructType::Upscaling)
         {
             ver = FfxApiProxy::VersionDx12_SR();
 
             providerDesc->versionId =
-                0xF5A5'CA1Eui64 << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
+                0xF5A5'CA1EULL << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
         }
         else if (type == FFXStructType::Denoiser)
         {
             ver = FfxApiProxy::VersionDx12_RR();
 
             providerDesc->versionId =
-                0xF5A5'CA1Eui64 << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
+                0xF5A5'CA1EULL << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
         }
         else if (type == FFXStructType::RadianceCache)
         {
             ver = FfxApiProxy::VersionDx12_RC();
 
             providerDesc->versionId =
-                0xF5A5'CA1Eui64 << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
+                0xF5A5'CA1EULL << 32 | (((ver.major << 22) | (ver.minor << 12) | ver.patch) & 0xFFFFFFFF);
         }
         else
         {
