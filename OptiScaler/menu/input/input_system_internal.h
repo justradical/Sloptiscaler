@@ -463,7 +463,13 @@ extern DirectInputGetDeviceState_t o_DirectInputDeviceGetDeviceState;
 extern DirectInputGetDeviceData_t o_DirectInputDeviceGetDeviceData;
 extern DirectInputDeviceRelease_t o_DirectInputDeviceRelease;
 
-extern thread_local int bypassHookDepth;
+// Defined here as an inline thread_local rather than declared extern with the
+// definition in input_system.cpp. Clang on Windows only emits the TLS
+// initialization wrapper in the defining TU when the variable needs dynamic
+// initialization; with a constant initializer it is omitted, yet other TUs
+// still reference it, leaving "thread-local initialization routine for
+// bypassHookDepth" undefined at link time.
+inline thread_local int bypassHookDepth = 0;
 
 class ScopedHookBypass
 {

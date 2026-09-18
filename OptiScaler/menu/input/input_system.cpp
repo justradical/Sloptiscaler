@@ -55,7 +55,7 @@ DirectInputGetDeviceState_t o_DirectInputDeviceGetDeviceState = nullptr;
 DirectInputGetDeviceData_t o_DirectInputDeviceGetDeviceData = nullptr;
 DirectInputDeviceRelease_t o_DirectInputDeviceRelease = nullptr;
 
-thread_local int bypassHookDepth = 0;
+// bypassHookDepth is now an inline thread_local in input_system_internal.h
 
 std::mutex& GetDetourTransactionMutex()
 {
