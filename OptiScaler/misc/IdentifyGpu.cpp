@@ -53,7 +53,7 @@ std::vector<GpuInformation> IdentifyGpu::checkGpuInfo()
 
     {
         ScopedCreatingD3DDevice creatingD3DDevice {};
-        result = DxgiProxy::CreateDxgiFactory_()(__uuidof(factory), (IDXGIFactory**) factory.GetAddressOf());
+        result = DxgiProxy::CreateDxgiFactory_()(__uuidof(IDXGIFactory6), (IDXGIFactory**) factory.GetAddressOf());
     }
 
     if (result != S_OK || factory == nullptr)
@@ -418,7 +418,7 @@ void IdentifyGpu::updateD3d12Capabilities(D3d12Proxy::PFN_D3D12CreateDevice o_D3
         ScopedSkipSpoofingThread skipSpoofingThread {};
 
         ComPtr<IDXGIFactory4> factory;
-        if (FAILED(DxgiProxy::CreateDxgiFactory_()(__uuidof(factory), (IDXGIFactory**) factory.GetAddressOf())))
+        if (FAILED(DxgiProxy::CreateDxgiFactory_()(__uuidof(IDXGIFactory4), (IDXGIFactory**) factory.GetAddressOf())))
             continue;
 
         ComPtr<IDXGIAdapter> adapter;

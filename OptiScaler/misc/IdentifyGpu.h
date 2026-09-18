@@ -96,3 +96,13 @@ class IdentifyGpu
     static void updateD3d12Capabilities(D3d12Proxy::PFN_D3D12CreateDevice o_D3D12CreateDevice = nullptr);
     static void updateInt8Support(std::optional<bool>& sdkSupportsInt8, std::optional<bool>& amdxcffx64SupportsInt8);
 };
+
+// MSVC derives __uuidof() from the DECLSPEC_UUID/MIDL_INTERFACE attribute.
+// mingw-w64 instead needs an explicit __CRT_UUID_DECL to specialise
+// __mingw_uuidof<T>, otherwise every __uuidof() on these interfaces is an
+// undefined reference at link time.
+#if !defined(_MSC_VER) && defined(__CRT_UUID_DECL)
+__CRT_UUID_DECL(ID3D12DXVKInteropDevice, 0x39da4e09, 0xbd1c, 0x4198, 0x9f, 0xae, 0x86, 0xbb, 0xe3, 0xbe, 0x41, 0xfd)
+__CRT_UUID_DECL(IDXGIVkInteropAdapter, 0x3a6d8f2c, 0xb0e8, 0x4ab4, 0xb4, 0xdc, 0x4f, 0xd2, 0x48, 0x91, 0xbf, 0xa5)
+__CRT_UUID_DECL(IDXGIVkInteropFactory, 0x4c5e1b0d, 0xb0c8, 0x4131, 0xbf, 0xd8, 0x9b, 0x24, 0x76, 0xf7, 0xf4, 0x08)
+#endif

@@ -88,3 +88,11 @@ class DECLSPEC_UUID("1af622a3-82d0-49cd-124f-cce05122c222") WrappedIDXGIFactory7
     HRESULT STDMETHODCALLTYPE RegisterAdaptersChangedEvent(HANDLE hEvent, DWORD* pdwCookie);
     HRESULT STDMETHODCALLTYPE UnregisterAdaptersChangedEvent(DWORD dwCookie);
 };
+
+// MSVC derives __uuidof() from the DECLSPEC_UUID/MIDL_INTERFACE attribute.
+// mingw-w64 instead needs an explicit __CRT_UUID_DECL to specialise
+// __mingw_uuidof<T>, otherwise every __uuidof() on these interfaces is an
+// undefined reference at link time.
+#if !defined(_MSC_VER) && defined(__CRT_UUID_DECL)
+__CRT_UUID_DECL(WrappedIDXGIFactory7, 0x1af622a3, 0x82d0, 0x49cd, 0x12, 0x4f, 0xcc, 0xe0, 0x51, 0x22, 0xc2, 0x22)
+#endif

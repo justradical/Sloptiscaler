@@ -136,3 +136,11 @@ class DECLSPEC_UUID("23b064bb-482d-416c-93b1-829acedfb3d0") Dx11wDx12SC final : 
 
     HWND _handle = nullptr;
 };
+
+// MSVC derives __uuidof() from the DECLSPEC_UUID/MIDL_INTERFACE attribute.
+// mingw-w64 instead needs an explicit __CRT_UUID_DECL to specialise
+// __mingw_uuidof<T>, otherwise every __uuidof() on these interfaces is an
+// undefined reference at link time.
+#if !defined(_MSC_VER) && defined(__CRT_UUID_DECL)
+__CRT_UUID_DECL(Dx11wDx12SC, 0x23b064bb, 0x482d, 0x416c, 0x93, 0xb1, 0x82, 0x9a, 0xce, 0xdf, 0xb3, 0xd0)
+#endif

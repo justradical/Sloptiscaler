@@ -148,3 +148,14 @@ class Amdxc64Hooks
     static void Init();
     static HRESULT hkAmdExtD3DCreateInterface(IUnknown* pOuter, REFIID riid, void** ppvObject);
 };
+
+// MSVC derives __uuidof() from the DECLSPEC_UUID/MIDL_INTERFACE attribute.
+// mingw-w64 instead needs an explicit __CRT_UUID_DECL to specialise
+// __mingw_uuidof<T>, otherwise every __uuidof() on these interfaces is an
+// undefined reference at link time.
+#if !defined(_MSC_VER) && defined(__CRT_UUID_DECL)
+__CRT_UUID_DECL(IAmdExtD3DDevice8, 0xF714E11A, 0xB54E, 0x4E0F, 0xAB, 0xC5, 0xDF, 0x58, 0xB1, 0x81, 0x33, 0xD1)
+__CRT_UUID_DECL(IAmdExtD3DFactory, 0x014937EC, 0x9288, 0x446F, 0xA9, 0xAC, 0xD7, 0x5A, 0x8E, 0x3A, 0x98, 0x4F)
+__CRT_UUID_DECL(IAmdExtD3DShaderIntrinsics, 0xBA019D53, 0xCCAB, 0x4CBD, 0xB5, 0x6A, 0x72, 0x30, 0xED, 0x43, 0x30, 0xAD)
+__CRT_UUID_DECL(IAmdExtFfxApi, 0xb58d6601, 0x7401, 0x4234, 0x81, 0x80, 0x6f, 0xeb, 0xfc, 0x0e, 0x48, 0x4c)
+#endif
