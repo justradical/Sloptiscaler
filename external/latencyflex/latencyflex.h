@@ -36,9 +36,14 @@ PERFETTO_DEFINE_CATEGORIES(
 #include <thread>
 #include <vector>
 
-#if defined __MINGW64__ || defined __MINGW32__
-#define max(a, b) std::max(a, b)
-#endif
+// NOTE: this mingw-only workaround used to read
+//
+//     #define max(a, b) std::max(a, b)
+//
+// which is self-defeating: the object-like expansion also fires on the
+// qualified calls in this header, turning std::max(...) into std::std::max(...).
+// It is never compiled on MSVC, so upstream never saw it break. <algorithm> is
+// already included above, so std::max resolves without any macro at all.
 
 namespace lfx
 {

@@ -87,7 +87,16 @@ enum class PCLMarker: uint32_t
 };
 
 // c++23 has to_underlying implementation
-#if __cplusplus == 202302L
+//
+// NOTE: the C++23 branch below is broken -- std::to_underlying is a function
+// template and cannot be aliased with a using-declaration of this form. It goes
+// unnoticed under MSVC because MSVC reports __cplusplus as 199711L unless
+// /Zc:__cplusplus is passed, so the guard is never true there. Clang at
+// -std=c++23 does report 202302L and hits it.
+//
+// Forcing the portable fallback below keeps behaviour identical on every
+// compiler; std::to_underlying and this template do exactly the same thing.
+#if 0 // was: __cplusplus == 202302L
 using to_underlying = std::to_underlying;
 #else
 // Return `enum class` member as value of underlying type (i.e. an int).  Basically same as:
