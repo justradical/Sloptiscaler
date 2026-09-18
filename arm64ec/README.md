@@ -37,13 +37,34 @@ clang defines `__x86_64__` for arm64ec (it uses the x64 ABI). Anything treating
 
 ## Build state
 
-- All 195 OptiScaler translation units compile clean for arm64ec.
-- Dependencies rebuilt for arm64ec: **Detours**, **freetype**.
-- Still x86-64 only: the FidelityFX static libs (`ffx_fsr2_*`, `ffx_fsr3*`,
-  `ffx_backend_dx11_*`). x64 objects cannot be linked into an ARM64EC image, so
-  these must be rebuilt from source before a full link.
-- XeSS is `LoadLibrary`'d rather than linked, so it is not a build blocker; it
-  simply will not work on ARM.
+- All OptiScaler translation units compile clean for arm64ec, and the DLL links.
+- Verified on device: it loads into an emulated x86-64 process, completes init,
+  attaches its Vulkan hook (so Detours hooking works under Wine+FEX) and unloads.
+- Dependencies rebuilt for arm64ec: **Detours**, **freetype**. The vulkan-1 and
+  `D3D12GetInterface` import libraries are synthesised at build time.
+- **SGSR2** is added as a working D3D12 upscaler backend -- see below.
+- **FSR does not work.** The FidelityFX static libs are x86-64 only and are
+  currently satisfied by generated stubs in `compat/arm64ec/ffx_stubs/` that fail
+  every call. Replacing them needs FidelityFX rebuilt from source for arm64ec,
+  which in turn needs its shader compiler cross-built for Linux.
+- XeSS and DLSS are `LoadLibrary`'d rather than linked, so they were never build
+  blockers; they simply cannot work on ARM.
+
+## SGSR2
+
+Snapdragon Game Super Resolution 2 is the upscaler that actually makes sense
+here: it ships as shader source only (BSD-3-Clause), so there is no x86-64 blob
+to port, and it is Qualcomm's own upscaler for the Adreno GPU this targets.
+
+`OptiScaler/upscalers/sgsr2/` holds an HLSL port of the reference GLSL 2-pass
+compute variant plus a D3D12 backend. Select it with `upscaler=sgsr2`.
+
+Validated so far: the shaders compile with Wine's d3dcompiler at cs_5_0 on the
+target device, and the DLL builds and loads with the backend registered. The
+upscaling path itself has **not** been exercised in a real game yet -- in
+particular the motion-vector sign/scale convention (`motionVectorScale` in the
+Convert pass) is derived rather than measured, and is the first thing to check
+if output looks smeared or inverted.
 
 ## Standard defines
 
