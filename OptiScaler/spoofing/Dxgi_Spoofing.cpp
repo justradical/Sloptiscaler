@@ -23,6 +23,27 @@
 // Treating "the caller is us" as unknown keeps the skip list working for
 // genuinely identified runtimes while letting real callers through. On x64 the
 // caller resolves to the game and this changes nothing.
+// Whether the calling module reported by _ReturnAddress() can be trusted.
+//
+// On ARM64EC an emulated x64 caller reaches an ARM64EC export through an entry
+// thunk, so the return address lands in a thunk rather than in the caller. Calls
+// coming from the game were attributed to d3d12core.dll / dxgi.dll, which are in
+// the graphics-runtime skip list below, so GPU spoofing was suppressed for every
+// call and games kept seeing the real adapter -- with no DLSS option exposed at
+// all. Verified on device with Pacific Drive.
+//
+// Where the attribution cannot be trusted, prefer spoofing over silently doing
+// nothing: the skip list is an optimisation to avoid confusing the graphics
+// runtime, not a correctness requirement.
+static constexpr bool OptiCallerIdUnreliable()
+{
+#if defined(_M_ARM64EC) || defined(__arm64ec__)
+    return true;
+#else
+    return false;
+#endif
+}
+
 static std::string SpoofingCaller(void* returnAddress)
 {
     if (Util::GetCallerModule(returnAddress) == dllModule)
@@ -60,8 +81,10 @@ HRESULT DxgiSpoofing::hkGetDesc3(IDXGIAdapter4* This, DXGI_ADAPTER_DESC3* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
-        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
-        return result;
+        LOG_TRACE("caller is a graphics runtime: {}", caller);
+
+        if (!OptiCallerIdUnreliable())
+            return result;
     }
 
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
@@ -106,8 +129,10 @@ HRESULT DxgiSpoofing::hkGetDesc2(IDXGIAdapter2* This, DXGI_ADAPTER_DESC2* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
-        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
-        return result;
+        LOG_TRACE("caller is a graphics runtime: {}", caller);
+
+        if (!OptiCallerIdUnreliable())
+            return result;
     }
 
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
@@ -154,8 +179,10 @@ HRESULT DxgiSpoofing::hkGetDesc1(IDXGIAdapter1* This, DXGI_ADAPTER_DESC1* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
-        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
-        return result;
+        LOG_TRACE("caller is a graphics runtime: {}", caller);
+
+        if (!OptiCallerIdUnreliable())
+            return result;
     }
 
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
@@ -213,8 +240,10 @@ HRESULT DxgiSpoofing::hkGetDesc(IDXGIAdapter* This, DXGI_ADAPTER_DESC* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
-        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
-        return result;
+        LOG_TRACE("caller is a graphics runtime: {}", caller);
+
+        if (!OptiCallerIdUnreliable())
+            return result;
     }
 
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);

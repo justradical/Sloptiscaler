@@ -478,6 +478,7 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     {
         LOG_ERROR("Missing inputs: color {0}, depth {1}, mv {2}, output {3}", paramColor != nullptr,
                   paramDepth != nullptr, paramVelocity != nullptr, paramOutput != nullptr);
+
         return false;
     }
 

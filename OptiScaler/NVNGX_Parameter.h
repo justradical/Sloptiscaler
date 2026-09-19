@@ -5,7 +5,7 @@
 // #define ENABLE_ENCAPSULATED_PARAMS
 
 // Log NVParam Set/Get operations
-#define LOG_PARAMS_VALUES
+// #define LOG_PARAMS_VALUES
 
 #ifdef LOG_PARAMS_VALUES
 // Same MSVC-ism as the logging macros in SysUtils.h: MSVC treats __FUNCTION__ as
