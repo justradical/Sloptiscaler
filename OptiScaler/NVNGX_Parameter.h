@@ -5,10 +5,18 @@
 // #define ENABLE_ENCAPSULATED_PARAMS
 
 // Log NVParam Set/Get operations
-// #define LOG_PARAMS_VALUES
+#define LOG_PARAMS_VALUES
 
 #ifdef LOG_PARAMS_VALUES
+// Same MSVC-ism as the logging macros in SysUtils.h: MSVC treats __FUNCTION__ as
+// a string literal and can concatenate it into the format string, clang cannot.
+#ifdef _MSC_VER
 #define LOG_PARAM(msg, ...) spdlog::trace(__FUNCTION__ " " msg, ##__VA_ARGS__)
+#else
+#define LOG_PARAM(msg, ...)                                                                                            \
+    spdlog::default_logger_raw()->log(spdlog::source_loc { __FILE__, __LINE__, __FUNCTION__ }, spdlog::level::trace,    \
+                                      msg, ##__VA_ARGS__)
+#endif
 #else
 #define LOG_PARAM(msg, ...)
 #endif
@@ -198,14 +206,26 @@ struct NVNGX_Parameters : public NVSDK_NGX_Parameter
 
     NVNGX_Parameters(API api, bool isPersistent);
 
+    // NOTE: these must be declared in exactly the same order as the virtuals in
+    // NVSDK_NGX_Parameter (nvsdk_ngx_params.h): ..., int, ID3D11Resource*,
+    // ID3D12Resource*, void*. The void* overload used to be declared sixth,
+    // ahead of the two resource overloads.
+    //
+    // On x86-64 that was harmless, because an override always takes the base's
+    // vtable slot. On ARM64EC it was not: the emulated x64 caller and this
+    // ARM64EC vtable disagreed about which slot was which, so the game's
+    // resource pointers landed in the float overload and were stored as
+    // denormals -- e.g. Set float('Color', 1.469372e-39) -- while its floats
+    // landed in the ID3D12Resource* overload. Every upscaler then saw null
+    // Color/Depth/MotionVectors and could not run.
     void Set(const char* key, unsigned long long value) override;
     void Set(const char* key, float value) override;
     void Set(const char* key, double value) override;
     void Set(const char* key, unsigned int value) override;
     void Set(const char* key, int value) override;
-    void Set(const char* key, void* value) override;
     void Set(const char* key, ID3D11Resource* value) override;
     void Set(const char* key, ID3D12Resource* value) override;
+    void Set(const char* key, void* value) override;
 
     NVSDK_NGX_Result Get(const char* key, unsigned long long* value) const override;
 
@@ -217,11 +237,11 @@ struct NVNGX_Parameters : public NVSDK_NGX_Parameter
 
     NVSDK_NGX_Result Get(const char* key, int* value) const override;
 
-    NVSDK_NGX_Result Get(const char* key, void** value) const override;
-
     NVSDK_NGX_Result Get(const char* key, ID3D11Resource** value) const override;
 
     NVSDK_NGX_Result Get(const char* key, ID3D12Resource** value) const override;
+
+    NVSDK_NGX_Result Get(const char* key, void** value) const override;
 
     void Reset() override;
 

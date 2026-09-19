@@ -50,6 +50,25 @@ typedef struct NVSDK_NGX_DLDenoise_Create_Params
 } NVSDK_NGX_DLDenoise_Create_Params;
 
 #ifdef __cplusplus
+/*
+ * NOTE (OptiScaler, ARM64EC): MSVC places a run of same-name overloaded virtual
+ * functions into the vtable in REVERSE declaration order; clang uses
+ * declaration order. Games calling this interface are built with MSVC, so on a
+ * clang build the two disagree and calls land in the wrong slot -- verified on
+ * an ARM64EC build by probing the vtable directly:
+ *
+ *   game Set(ID3D12Resource*) -> MSVC slot 1 -> our slot 1 was Set(float)
+ *   game Set(float)           -> MSVC slot 6 -> our slot 6 was Set(ID3D12Resource*)
+ *   game Set(unsigned int)    -> MSVC slot 4 -> our slot 4 was Set(int)
+ *
+ * The visible symptom was every upscaler seeing null Color/Depth/MotionVectors
+ * (resource pointers were stored as denormal floats) while jitter, sharpness and
+ * exposure arrived as "resources".
+ *
+ * Declaring the overloads in reverse for non-MSVC compilers makes clang produce
+ * the same vtable layout MSVC does. MSVC keeps the original order.
+ */
+#ifdef _MSC_VER
 typedef struct NVSDK_NGX_Parameter
 {
     virtual void Set(const char * InName, unsigned long long InValue) = 0;
@@ -72,6 +91,30 @@ typedef struct NVSDK_NGX_Parameter
     
     virtual void Reset() = 0;
 } NVSDK_NGX_Parameter;
+#else
+typedef struct NVSDK_NGX_Parameter
+{
+    virtual void Set(const char * InName, void *InValue) = 0;
+    virtual void Set(const char * InName, ID3D12Resource *InValue) = 0;
+    virtual void Set(const char * InName, ID3D11Resource *InValue) = 0;
+    virtual void Set(const char * InName, int InValue) = 0;
+    virtual void Set(const char * InName, unsigned int InValue) = 0;
+    virtual void Set(const char * InName, double InValue) = 0;
+    virtual void Set(const char * InName, float InValue) = 0;
+    virtual void Set(const char * InName, unsigned long long InValue) = 0;
+
+    virtual NVSDK_NGX_Result Get(const char * InName, void **OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, ID3D12Resource **OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, ID3D11Resource **OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, int *OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, unsigned int *OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, double *OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, float *OutValue) const = 0;
+    virtual NVSDK_NGX_Result Get(const char * InName, unsigned long long *OutValue) const = 0;
+
+    virtual void Reset() = 0;
+} NVSDK_NGX_Parameter;
+#endif
 #else
 typedef struct NVSDK_NGX_Parameter NVSDK_NGX_Parameter;
 #endif // _cplusplus
