@@ -10,6 +10,27 @@
 #include <cctype>
 #include <misc/IdentifyGpu.h>
 
+// Resolves the calling module for the spoofing decisions below.
+//
+// On ARM64EC an emulated x64 caller reaches an ARM64EC export through an entry
+// thunk, so _ReturnAddress() lands inside OptiScaler's own module rather than in
+// the game. Every call is then attributed to OptiScaler -- which, when installed
+// as a proxy, is literally named dxgi.dll. That name is in the graphics-runtime
+// skip list used by each hook, so the early-out matched every call and GPU
+// spoofing silently never applied: games kept seeing the real adapter and
+// disabled their DLSS/FSR options.
+//
+// Treating "the caller is us" as unknown keeps the skip list working for
+// genuinely identified runtimes while letting real callers through. On x64 the
+// caller resolves to the game and this changes nothing.
+static std::string SpoofingCaller(void* returnAddress)
+{
+    if (Util::GetCallerModule(returnAddress) == dllModule)
+        return {};
+
+    return Util::WhoIsTheCaller(returnAddress);
+}
+
 typedef HRESULT (*PFN_GetDesc)(IDXGIAdapter* This, DXGI_ADAPTER_DESC* pDesc);
 typedef HRESULT (*PFN_GetDesc1)(IDXGIAdapter1* This, DXGI_ADAPTER_DESC1* pDesc);
 typedef HRESULT (*PFN_GetDesc2)(IDXGIAdapter2* This, DXGI_ADAPTER_DESC2* pDesc);
@@ -34,7 +55,7 @@ HRESULT DxgiSpoofing::hkGetDesc3(IDXGIAdapter4* This, DXGI_ADAPTER_DESC3* pDesc)
 {
     auto result = o_GetDesc3(This, pDesc);
 
-    auto caller = Util::WhoIsTheCaller(_ReturnAddress());
+    auto caller = SpoofingCaller(_ReturnAddress());
 
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
@@ -83,7 +104,7 @@ HRESULT DxgiSpoofing::hkGetDesc2(IDXGIAdapter2* This, DXGI_ADAPTER_DESC2* pDesc)
 {
     auto result = o_GetDesc2(This, pDesc);
 
-    auto caller = Util::WhoIsTheCaller(_ReturnAddress());
+    auto caller = SpoofingCaller(_ReturnAddress());
 
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
@@ -134,7 +155,7 @@ HRESULT DxgiSpoofing::hkGetDesc1(IDXGIAdapter1* This, DXGI_ADAPTER_DESC1* pDesc)
 {
     auto result = o_GetDesc1(This, pDesc);
 
-    auto caller = Util::WhoIsTheCaller(_ReturnAddress());
+    auto caller = SpoofingCaller(_ReturnAddress());
 
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
@@ -196,7 +217,7 @@ HRESULT DxgiSpoofing::hkGetDesc(IDXGIAdapter* This, DXGI_ADAPTER_DESC* pDesc)
 {
     auto result = o_GetDesc(This, pDesc);
 
-    auto caller = Util::WhoIsTheCaller(_ReturnAddress());
+    auto caller = SpoofingCaller(_ReturnAddress());
 
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
