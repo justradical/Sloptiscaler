@@ -60,12 +60,11 @@ HRESULT DxgiSpoofing::hkGetDesc3(IDXGIAdapter4* This, DXGI_ADAPTER_DESC3* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
+        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
         return result;
     }
 
-#if _DEBUG
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
-#endif
 
     if (result == S_OK)
     {
@@ -89,9 +88,7 @@ HRESULT DxgiSpoofing::hkGetDesc3(IDXGIAdapter4* This, DXGI_ADAPTER_DESC3* pDesc)
             std::memset(pDesc->Description, 0, sizeof(pDesc->Description));
             std::wcscpy(pDesc->Description, szName.c_str());
 
-#ifdef _DEBUG
-            LOG_DEBUG("spoofing");
-#endif
+            LOG_TRACE("spoofed to vendor {:X} device {:X}", pDesc->VendorId, pDesc->DeviceId);
         }
     }
 
@@ -109,12 +106,11 @@ HRESULT DxgiSpoofing::hkGetDesc2(IDXGIAdapter2* This, DXGI_ADAPTER_DESC2* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
+        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
         return result;
     }
 
-#if _DEBUG
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
-#endif
 
     if (result == S_OK)
     {
@@ -140,9 +136,7 @@ HRESULT DxgiSpoofing::hkGetDesc2(IDXGIAdapter2* This, DXGI_ADAPTER_DESC2* pDesc)
             std::memset(pDesc->Description, 0, sizeof(pDesc->Description));
             std::wcscpy(pDesc->Description, szName.c_str());
 
-#ifdef _DEBUG
-            LOG_DEBUG("spoofing");
-#endif
+            LOG_TRACE("spoofed to vendor {:X} device {:X}", pDesc->VendorId, pDesc->DeviceId);
         }
     }
 
@@ -160,12 +154,11 @@ HRESULT DxgiSpoofing::hkGetDesc1(IDXGIAdapter1* This, DXGI_ADAPTER_DESC1* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
+        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
         return result;
     }
 
-#if _DEBUG
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
-#endif
 
     if (result == S_OK)
     {
@@ -191,9 +184,7 @@ HRESULT DxgiSpoofing::hkGetDesc1(IDXGIAdapter1* This, DXGI_ADAPTER_DESC1* pDesc)
             std::memset(pDesc->Description, 0, sizeof(pDesc->Description));
             std::wcscpy(pDesc->Description, szName.c_str());
 
-#ifdef _DEBUG
-            LOG_DEBUG("spoofing");
-#endif
+            LOG_TRACE("spoofed to vendor {:X} device {:X}", pDesc->VendorId, pDesc->DeviceId);
         }
 
         if (caller.starts_with("amdxcffx64") || caller.starts_with("amd_fidelityfx_upscaler_dx12"))
@@ -222,12 +213,11 @@ HRESULT DxgiSpoofing::hkGetDesc(IDXGIAdapter* This, DXGI_ADAPTER_DESC* pDesc)
     if (iequals(caller, "vulkan-1.dll") || iequals(caller, "amdvlk64.dll") || iequals(caller, "dxgi.dll") ||
         iequals(caller, "d3d12.dll") || iequals(caller, "d3d12Core.dll"))
     {
+        LOG_TRACE("skipping, caller is a graphics runtime: {}", caller);
         return result;
     }
 
-#if _DEBUG
     LOG_TRACE("result: {:X}, caller: {}", (UINT) result, caller);
-#endif
 
     if (result == S_OK)
     {
@@ -253,9 +243,7 @@ HRESULT DxgiSpoofing::hkGetDesc(IDXGIAdapter* This, DXGI_ADAPTER_DESC* pDesc)
             std::memset(pDesc->Description, 0, sizeof(pDesc->Description));
             std::wcscpy(pDesc->Description, szName.c_str());
 
-#ifdef _DEBUG
-            LOG_DEBUG("spoofing");
-#endif
+            LOG_TRACE("spoofed to vendor {:X} device {:X}", pDesc->VendorId, pDesc->DeviceId);
         }
     }
 

@@ -28,6 +28,34 @@ static VkInstance _instance = VK_NULL_HANDLE;
 static VkPhysicalDevice _PD = VK_NULL_HANDLE;
 static HWND _hwnd = nullptr;
 
+// Resolves the window the overlay should attach its input to.
+//
+// _hwnd is normally captured in hkvkCreateWin32SurfaceKHR. Under Proton a D3D12
+// title reaches the screen through vkd3d-proton, and OptiScaler deliberately
+// stands down while "DXVK/VKD3D is creating a D3D device", so that surface hook
+// never runs and _hwnd stays null. The overlay then initialises against window 0
+// and never subclasses anything: it renders every frame but receives no input at
+// all, so the menu shortcut appears dead.
+//
+// The handle is known by then -- the DXGI swapchain was created with it -- so
+// fall back to that, and to the process window as a last resort.
+static HWND ResolveOverlayHwnd()
+{
+    if (_hwnd != nullptr)
+        return _hwnd;
+
+    if (auto scHwnd = State::Instance().currentSwapchainDesc.OutputWindow; scHwnd != nullptr)
+    {
+        LOG_DEBUG("no Win32 surface hwnd, using swapchain window: {0:X}", (UINT64) scHwnd);
+        return scHwnd;
+    }
+
+    auto procHwnd = Util::GetProcessWindow();
+    LOG_DEBUG("no Win32 surface or swapchain hwnd, using process window: {0:X}", (UINT64) procHwnd);
+    return procHwnd;
+}
+
+
 static std::mutex _vkPresentMutex;
 
 PFN_vkCreateDevice o_vkCreateDevice = nullptr;
@@ -309,7 +337,8 @@ static VkResult hkvkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateI
         _device = device;
         LOG_DEBUG("_device captured: {0:X}", (UINT64) _device);
 
-        MenuOverlayVk::CreateSwapchain(device, _PD, _instance, _hwnd, pCreateInfo, pAllocator, pSwapchain);
+        MenuOverlayVk::CreateSwapchain(device, _PD, _instance, ResolveOverlayHwnd(), pCreateInfo, pAllocator,
+                                       pSwapchain);
     }
 
     LOG_FUNC_RESULT(result);
