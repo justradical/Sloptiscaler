@@ -447,28 +447,12 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
 
     // SGSR2 consumes "Motion" in clip-space units: it reprojects with
     //     PrevUV = (Hruv.x - 0.5*Motion.x, Hruv.y + 0.5*Motion.y)
-    // so Motion is an NDC delta, while UE hands NGX the velocity buffer in its
-    // native half-NDC (UV-space) encoding -- prevUV - curUV, not prevNDC -
-    // curNDC. Converting UV to NDC is exactly a factor of two, hence the 2.0
-    // here; the sign flip on X is D3D12 clip-space Y up against texture V down.
+    // so Motion is an NDC delta. The sign flip on X is D3D12 clip-space Y up
+    // against texture V down.
     //
-    // Pixel space is ruled out empirically, not just by derivation: at a 1129px
-    // render width, reading pixel-space vectors as NDC would over-reproject by
-    // ~564x and the image would be unrecognisable rather than merely smeared.
-    //
-    // Measured in Hi-Fi Rush (walking, mid-motion capture, gradient energy of
-    // the frame as a detail-retention proxy), two runs per setting:
-    //     scale x1  ->  147.1, 147.7
-    //     scale x2  ->  169.1, 171.2
-    //     scale x4  ->  174.5
-    // x1 is reproducibly the worst and visibly smears brickwork, the TV and
-    // thin railings that x2 resolves. Note the proxy cannot separate x2 from
-    // x4: over-reprojection makes history miss, the neighbourhood clamp
-    // rejects it, and falling back to the current frame also scores as
-    // "sharp". x2 is the value with an actual derivation behind it; x4 has
-    // none. OPTI_SGSR2_MVX/MVY below still override this per run.
-    _constants.motionVectorScale[0] = -2.0f * mvScaleX;
-    _constants.motionVectorScale[1] = 2.0f * mvScaleY;
+    // This scale is NOT established. OPTI_SGSR2_MVX/MVY below override it.
+    _constants.motionVectorScale[0] = -mvScaleX;
+    _constants.motionVectorScale[1] = mvScaleY;
 
     // Temporary tuning hook: lets the motion-vector convention be dialled in on
     // a device without a rebuild. OPTI_SGSR2_MVX/MVY override the scale outright.
