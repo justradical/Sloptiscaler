@@ -8,6 +8,8 @@
 #include <MathUtils.h>
 
 #include <d3dcompiler.h>
+#include <algorithm>
+#include <cstring>
 #include <cstdlib>
 
 // Render/display resolution is dispatched in 8x8 tiles, matching [numthreads].
@@ -264,8 +266,113 @@ bool SGSR2FeatureDx12::CreateResources(ID3D12Device* device)
         return false;
     }
 
+    const char* timingEnv = std::getenv("OPTI_SGSR2_TIMING");
+    _timingEnabled = timingEnv != nullptr && timingEnv[0] == '1';
+
+    if (_timingEnabled)
+    {
+        auto* queue = State::Instance().currentCommandQueue;
+        if (queue == nullptr || FAILED(queue->GetTimestampFrequency(&_timerFrequency)) || _timerFrequency == 0)
+        {
+            LOG_WARN("OPTI_SGSR2_TIMING set but no queue timestamp frequency; timing disabled");
+            _timingEnabled = false;
+        }
+    }
+
+    if (_timingEnabled)
+    {
+        D3D12_QUERY_HEAP_DESC qh {};
+        qh.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+        qh.Count = TimestampsPerFrame * FrameRingDepth;
+
+        D3D12_HEAP_PROPERTIES rbHeap {};
+        rbHeap.Type = D3D12_HEAP_TYPE_READBACK;
+
+        D3D12_RESOURCE_DESC rbDesc {};
+        rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        rbDesc.Width = (UINT64) qh.Count * sizeof(uint64_t);
+        rbDesc.Height = 1;
+        rbDesc.DepthOrArraySize = 1;
+        rbDesc.MipLevels = 1;
+        rbDesc.Format = DXGI_FORMAT_UNKNOWN;
+        rbDesc.SampleDesc.Count = 1;
+        rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        if (FAILED(device->CreateQueryHeap(&qh, IID_PPV_ARGS(&_timestampHeap))) ||
+            FAILED(device->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+                                                   D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                   IID_PPV_ARGS(&_timestampReadback))))
+        {
+            LOG_WARN("Timestamp query resources failed; timing disabled");
+            _timingEnabled = false;
+        }
+        else
+        {
+            LOG_INFO("GPU timing enabled, timestamp frequency {0} Hz", _timerFrequency);
+        }
+    }
+
     _historyValid = false;
     return true;
+}
+
+void SGSR2FeatureDx12::ResolveTimestamps(ID3D12GraphicsCommandList* InCommandList)
+{
+    const uint32_t base = _ringIndex * TimestampsPerFrame;
+
+    auto now = std::chrono::steady_clock::now();
+    if (_timingLastEvaluate.time_since_epoch().count() != 0)
+    {
+        _timingWallMs += std::chrono::duration<double, std::milli>(now - _timingLastEvaluate).count();
+        _timingWallSamples++;
+    }
+    _timingLastEvaluate = now;
+
+    uint64_t ts[TimestampsPerFrame] {};
+    D3D12_RANGE readRange { (SIZE_T) base * sizeof(uint64_t), (SIZE_T) (base + TimestampsPerFrame) * sizeof(uint64_t) };
+    void* mapped = nullptr;
+
+    if (SUCCEEDED(_timestampReadback->Map(0, &readRange, &mapped)) && mapped != nullptr)
+    {
+        memcpy(ts, (const uint8_t*) mapped + readRange.Begin, sizeof(ts));
+        D3D12_RANGE noWrite { 0, 0 };
+        _timestampReadback->Unmap(0, &noWrite);
+    }
+
+    if (ts[1] > ts[0] && ts[3] > ts[2])
+    {
+        const double toMs = 1000.0 / (double) _timerFrequency;
+        const double p1 = (double) (ts[1] - ts[0]) * toMs;
+        const double p2 = (double) (ts[3] - ts[2]) * toMs;
+
+        _timingPass1Ms += p1;
+        _timingPass2Ms += p2;
+        _timingWorstMs = std::max(_timingWorstMs, p1 + p2);
+        _timingSamples++;
+
+        if (_timingSamples >= 300)
+        {
+            const double n = (double) _timingSamples;
+            const double wall = _timingWallSamples > 0 ? _timingWallMs / (double) _timingWallSamples : 0.0;
+            const double cost = (_timingPass1Ms + _timingPass2Ms) / n;
+
+            LOG_INFO("SGSR2 {0}x{1} -> {2}x{3} over {4} frames: convert {5:.3f} + upscale {6:.3f} = {7:.3f} ms/frame "
+                     "GPU (worst {8:.3f}); frame {9:.2f} ms = {10:.1f} fps, upscaler is {11:.1f}% of it",
+                     RenderWidth(), RenderHeight(), TargetWidth(), TargetHeight(), _timingSamples,
+                     _timingPass1Ms / n, _timingPass2Ms / n, cost, _timingWorstMs, wall,
+                     wall > 0.0 ? 1000.0 / wall : 0.0, wall > 0.0 ? 100.0 * cost / wall : 0.0);
+
+            _timingPass1Ms = 0.0;
+            _timingPass2Ms = 0.0;
+            _timingWorstMs = 0.0;
+            _timingSamples = 0;
+            _timingWallMs = 0.0;
+            _timingWallSamples = 0;
+        }
+    }
+
+    InCommandList->ResolveQueryData(_timestampHeap, D3D12_QUERY_TYPE_TIMESTAMP, base, TimestampsPerFrame,
+                                    _timestampReadback, (UINT64) base * sizeof(uint64_t));
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE SGSR2FeatureDx12::BindPass(ID3D12Device* device, uint32_t passIndex,
@@ -340,26 +447,26 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
 
     // SGSR2 consumes "Motion" in clip-space units: it reprojects with
     //     PrevUV = (Hruv.x - 0.5*Motion.x, Hruv.y + 0.5*Motion.y)
-    // so Motion is an NDC delta, while UE hands NGX its velocity buffer in the
+    // so Motion is an NDC delta, while UE hands NGX the velocity buffer in its
     // native half-NDC (UV-space) encoding -- prevUV - curUV, not prevNDC -
-    // curNDC. UV to NDC is exactly a factor of two, hence the 2.0f; the sign
-    // flip on X is D3D12 clip-space Y up against texture V down.
+    // curNDC. Converting UV to NDC is exactly a factor of two, hence the 2.0
+    // here; the sign flip on X is D3D12 clip-space Y up against texture V down.
     //
-    // Pixel space is ruled out empirically as well as by derivation: at a
-    // 1129px render width, reading pixel-space vectors as NDC would
-    // over-reproject by ~564x and the image would be unrecognisable rather
-    // than merely smeared.
+    // Pixel space is ruled out empirically, not just by derivation: at a 1129px
+    // render width, reading pixel-space vectors as NDC would over-reproject by
+    // ~564x and the image would be unrecognisable rather than merely smeared.
     //
-    // Measured in Hi-Fi Rush (mid-walk capture, gradient energy of the frame
-    // as a detail-retention proxy), from the same save point each run:
+    // Measured in Hi-Fi Rush (walking, mid-motion capture, gradient energy of
+    // the frame as a detail-retention proxy), two runs per setting:
     //     scale x1  ->  147.1, 147.7
     //     scale x2  ->  169.1, 171.2
     //     scale x4  ->  174.5
-    // x1 is reproducibly the worst, and visibly smears brickwork, the TV and
-    // thin railings that x2 resolves. The proxy cannot separate x2 from x4:
-    // over-reprojection makes history miss, the neighbourhood clamp rejects
-    // it, and falling back to the current frame also scores as "sharp". x2 is
-    // the value with a derivation behind it; x4 has none.
+    // x1 is reproducibly the worst and visibly smears brickwork, the TV and
+    // thin railings that x2 resolves. Note the proxy cannot separate x2 from
+    // x4: over-reprojection makes history miss, the neighbourhood clamp
+    // rejects it, and falling back to the current frame also scores as
+    // "sharp". x2 is the value with an actual derivation behind it; x4 has
+    // none. OPTI_SGSR2_MVX/MVY below still override this per run.
     _constants.motionVectorScale[0] = -2.0f * mvScaleX;
     _constants.motionVectorScale[1] = 2.0f * mvScaleY;
 
@@ -579,7 +686,13 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         uavTable.ptr += (UINT64) SRV_Count * _descriptorSize;
         InCommandList->SetComputeRootDescriptorTable(2, uavTable);
 
+        if (_timingEnabled)
+            InCommandList->EndQuery(_timestampHeap, D3D12_QUERY_TYPE_TIMESTAMP, _ringIndex * TimestampsPerFrame + 0);
+
         InCommandList->Dispatch(DivRoundUp(RenderWidth(), kTileSize), DivRoundUp(RenderHeight(), kTileSize), 1);
+
+        if (_timingEnabled)
+            InCommandList->EndQuery(_timestampHeap, D3D12_QUERY_TYPE_TIMESTAMP, _ringIndex * TimestampsPerFrame + 1);
     }
 
     // Convert's UAV writes are Upscale's SRV reads.
@@ -647,7 +760,13 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         uavTable.ptr += (UINT64) SRV_Count * _descriptorSize;
         InCommandList->SetComputeRootDescriptorTable(2, uavTable);
 
+        if (_timingEnabled)
+            InCommandList->EndQuery(_timestampHeap, D3D12_QUERY_TYPE_TIMESTAMP, _ringIndex * TimestampsPerFrame + 2);
+
         InCommandList->Dispatch(DivRoundUp(TargetWidth(), kTileSize), DivRoundUp(TargetHeight(), kTileSize), 1);
+
+        if (_timingEnabled)
+            InCommandList->EndQuery(_timestampHeap, D3D12_QUERY_TYPE_TIMESTAMP, _ringIndex * TimestampsPerFrame + 3);
     }
 
     const bool wroteDirect = (paramOutput->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0;
@@ -714,6 +833,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     ResourceBarrier(InCommandList, paramVelocity, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                     (D3D12_RESOURCE_STATES) mvState);
 
+    if (_timingEnabled)
+        ResolveTimestamps(InCommandList);
+
     _historyIndex ^= 1;
     _historyValid = true;
     _ringIndex = (_ringIndex + 1) % FrameRingDepth;
@@ -739,6 +861,8 @@ void SGSR2FeatureDx12::ReleaseResources()
         _constantBufferMapped = nullptr;
     }
 
+    release(_timestampHeap);
+    release(_timestampReadback);
     release(_constantBuffer);
     release(_motionDepthClipAlpha);
     release(_ycocgColor);

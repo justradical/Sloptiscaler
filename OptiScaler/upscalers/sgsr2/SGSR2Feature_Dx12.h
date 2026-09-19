@@ -4,6 +4,7 @@
 #include <upscalers/IFeature_Dx12.h>
 
 #include <d3d12.h>
+#include <chrono>
 
 //============================================================================================================
 // SGSR2 on D3D12.
@@ -65,6 +66,22 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
     ID3D12Resource* _outputBuffer = nullptr;
     uint32_t _historyIndex = 0;
     bool _historyValid = false;
+
+    // GPU timing, opt-in via OPTI_SGSR2_TIMING=1.
+    static constexpr uint32_t TimestampsPerFrame = 4;
+    ID3D12QueryHeap* _timestampHeap = nullptr;
+    ID3D12Resource* _timestampReadback = nullptr;
+    bool _timingEnabled = false;
+    uint64_t _timerFrequency = 0;
+    double _timingPass1Ms = 0.0;
+    double _timingPass2Ms = 0.0;
+    double _timingWorstMs = 0.0;
+    uint32_t _timingSamples = 0;
+    std::chrono::steady_clock::time_point _timingLastEvaluate {};
+    double _timingWallMs = 0.0;
+    uint32_t _timingWallSamples = 0;
+
+    void ResolveTimestamps(ID3D12GraphicsCommandList* InCommandList);
 
     bool CreatePipelines(ID3D12Device* device);
     bool CreateResources(ID3D12Device* device);
