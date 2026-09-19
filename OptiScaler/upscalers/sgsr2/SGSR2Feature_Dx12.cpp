@@ -340,15 +340,28 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
 
     // SGSR2 consumes "Motion" in clip-space units: it reprojects with
     //     PrevUV = (Hruv.x - 0.5*Motion.x, Hruv.y + 0.5*Motion.y)
-    // so Motion is an NDC delta and the vectors NGX supplies (after MV_Scale)
-    // are already in that space -- they need a sign convention, not a rescale.
+    // so Motion is an NDC delta, while UE hands NGX its velocity buffer in the
+    // native half-NDC (UV-space) encoding -- prevUV - curUV, not prevNDC -
+    // curNDC. UV to NDC is exactly a factor of two, hence the 2.0f; the sign
+    // flip on X is D3D12 clip-space Y up against texture V down.
     //
-    // Measured on device: dividing by the render size, as a pixel-space reading
-    // would require, under-reprojects by ~renderWidth/2 and the image smears
-    // badly in motion. Treating them as NDC removes it. D3D12 has clip-space Y
-    // up against texture V down, hence the sign flip on X only.
-    _constants.motionVectorScale[0] = -mvScaleX;
-    _constants.motionVectorScale[1] = mvScaleY;
+    // Pixel space is ruled out empirically as well as by derivation: at a
+    // 1129px render width, reading pixel-space vectors as NDC would
+    // over-reproject by ~564x and the image would be unrecognisable rather
+    // than merely smeared.
+    //
+    // Measured in Hi-Fi Rush (mid-walk capture, gradient energy of the frame
+    // as a detail-retention proxy), from the same save point each run:
+    //     scale x1  ->  147.1, 147.7
+    //     scale x2  ->  169.1, 171.2
+    //     scale x4  ->  174.5
+    // x1 is reproducibly the worst, and visibly smears brickwork, the TV and
+    // thin railings that x2 resolves. The proxy cannot separate x2 from x4:
+    // over-reprojection makes history miss, the neighbourhood clamp rejects
+    // it, and falling back to the current frame also scores as "sharp". x2 is
+    // the value with a derivation behind it; x4 has none.
+    _constants.motionVectorScale[0] = -2.0f * mvScaleX;
+    _constants.motionVectorScale[1] = 2.0f * mvScaleY;
 
     // Temporary tuning hook: lets the motion-vector convention be dialled in on
     // a device without a rebuild. OPTI_SGSR2_MVX/MVY override the scale outright.
