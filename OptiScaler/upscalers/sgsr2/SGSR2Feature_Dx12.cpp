@@ -8,6 +8,7 @@
 #include <MathUtils.h>
 
 #include <d3dcompiler.h>
+#include <cstdlib>
 
 // Render/display resolution is dispatched in 8x8 tiles, matching [numthreads].
 static constexpr uint32_t kTileSize = 8;
@@ -337,8 +338,24 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
         mvScaleY = 1.0f;
     }
 
-    _constants.motionVectorScale[0] = -2.0f * mvScaleX / rw;
-    _constants.motionVectorScale[1] = 2.0f * mvScaleY / rh;
+    // SGSR2 consumes "Motion" in clip-space units: it reprojects with
+    //     PrevUV = (Hruv.x - 0.5*Motion.x, Hruv.y + 0.5*Motion.y)
+    // so Motion is an NDC delta and the vectors NGX supplies (after MV_Scale)
+    // are already in that space -- they need a sign convention, not a rescale.
+    //
+    // Measured on device: dividing by the render size, as a pixel-space reading
+    // would require, under-reprojects by ~renderWidth/2 and the image smears
+    // badly in motion. Treating them as NDC removes it. D3D12 has clip-space Y
+    // up against texture V down, hence the sign flip on X only.
+    _constants.motionVectorScale[0] = -mvScaleX;
+    _constants.motionVectorScale[1] = mvScaleY;
+
+    // Temporary tuning hook: lets the motion-vector convention be dialled in on
+    // a device without a rebuild. OPTI_SGSR2_MVX/MVY override the scale outright.
+    if (const char* e = std::getenv("OPTI_SGSR2_MVX"))
+        _constants.motionVectorScale[0] = (float) atof(e);
+    if (const char* e = std::getenv("OPTI_SGSR2_MVY"))
+        _constants.motionVectorScale[1] = (float) atof(e);
 
     // The units NGX motion vectors arrive in vary by engine, and this scale is
     // the single place that convention lives. Report it once so a smeared or
@@ -584,8 +601,29 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         DXGI_FORMAT srvFormats[SRV_Count] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
                                               DXGI_FORMAT_R32_UINT };
 
-        ID3D12Resource* uavs[UAV_Count] = { _outputBuffer, nextHistory };
-        DXGI_FORMAT uavFormats[UAV_Count] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT };
+        // Writing straight into the game's output avoids a full display-resolution
+        // copy every frame (~16 MB at 1080p RGBA16F), which is a large cost on a
+        // mobile GPU. Fall back to the internal buffer when the game did not
+        // create its output with UAV access.
+        const bool directToOutput = (paramOutput->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0;
+        ID3D12Resource* finalTarget = directToOutput ? paramOutput : _outputBuffer;
+
+        ID3D12Resource* uavs[UAV_Count] = { finalTarget, nextHistory };
+        DXGI_FORMAT uavFormats[UAV_Count] = { directToOutput ? ResolveFormat(paramOutput->GetDesc().Format)
+                                                             : DXGI_FORMAT_R16G16B16A16_FLOAT,
+                                              DXGI_FORMAT_R16G16B16A16_FLOAT };
+
+        if (directToOutput)
+        {
+            D3D12_RESOURCE_BARRIER toUav {};
+            toUav.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            toUav.Transition.pResource = paramOutput;
+            toUav.Transition.StateBefore = (D3D12_RESOURCE_STATES) outputState;
+            toUav.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            toUav.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            if (outputState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+                InCommandList->ResourceBarrier(1, &toUav);
+        }
 
         auto table = BindPass(Device, 1, srvs, srvFormats, uavs, uavFormats);
 
@@ -599,7 +637,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         InCommandList->Dispatch(DivRoundUp(TargetWidth(), kTileSize), DivRoundUp(TargetHeight(), kTileSize), 1);
     }
 
-    // Hand the result to the rest of OptiScaler's pipeline via the game's output.
+    const bool wroteDirect = (paramOutput->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0;
+
+    if (!wroteDirect)
     {
         D3D12_RESOURCE_BARRIER barriers[2] {};
         barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -615,9 +655,8 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 
         InCommandList->ResourceBarrier(2, barriers);
+        InCommandList->CopyResource(paramOutput, _outputBuffer);
     }
-
-    InCommandList->CopyResource(paramOutput, _outputBuffer);
 
     // Restore everything to the states the caller expects.
     {
@@ -633,8 +672,18 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
             return b;
         };
 
-        barriers[0] = make(_outputBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        barriers[1] = make(paramOutput, D3D12_RESOURCE_STATE_COPY_DEST, (D3D12_RESOURCE_STATES) outputState);
+        if (wroteDirect)
+        {
+            barriers[0] = make(_outputBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                               D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            barriers[1] = make(paramOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                               (D3D12_RESOURCE_STATES) outputState);
+        }
+        else
+        {
+            barriers[0] = make(_outputBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            barriers[1] = make(paramOutput, D3D12_RESOURCE_STATE_COPY_DEST, (D3D12_RESOURCE_STATES) outputState);
+        }
         barriers[2] = make(_motionDepthClipAlpha, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         barriers[3] = make(_ycocgColor, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
