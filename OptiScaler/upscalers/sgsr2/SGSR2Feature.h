@@ -35,10 +35,17 @@ struct alignas(16) SGSR2Constants
     uint32_t bSameCamera;
     uint32_t reset;
     uint32_t depthInverted;
-    uint32_t _pad1;
+    // Diagnostics only (OPTI_SGSR2_DEBUG=1): replaces the upscaled output with a
+    // visualisation of the motion field, so a sparse or mis-scaled velocity
+    // buffer can be seen directly instead of inferred from smearing.
+    uint32_t debugMode;
+    // Dimensions of the game's velocity texture. Passed in because
+    // GetDimensions() is unusable on this stack (see SGSR2_Shaders.h).
+    uint32_t mvSize[2];
+    uint32_t _pad2[2];
 };
 
-static_assert(sizeof(SGSR2Constants) == 144, "SGSR2Constants must match the HLSL cbuffer layout");
+static_assert(sizeof(SGSR2Constants) == 160, "SGSR2Constants must match the HLSL cbuffer layout");
 
 class SGSR2Feature : public virtual IFeature
 {

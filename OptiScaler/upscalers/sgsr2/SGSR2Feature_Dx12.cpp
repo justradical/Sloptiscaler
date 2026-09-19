@@ -450,7 +450,13 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
     // so Motion is an NDC delta. The sign flip on X is D3D12 clip-space Y up
     // against texture V down.
     //
-    // This scale is NOT established. OPTI_SGSR2_MVX/MVY below override it.
+    // This scale is NOT well established. It was briefly changed to +/-2 on the
+    // strength of a sharpness comparison in Hi-Fi Rush, which turned out to be
+    // worthless: that game hands NGX an all-zero velocity subrect, so every
+    // measurement was comparing scaled zeros and the differences were scene
+    // variation between runs. Reverted to the original +/-1 until it can be
+    // measured somewhere the vectors are actually non-zero. OPTI_SGSR2_MVX/MVY
+    // below override it for exactly that purpose.
     _constants.motionVectorScale[0] = -mvScaleX;
     _constants.motionVectorScale[1] = mvScaleY;
 
@@ -513,6 +519,10 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
     // Reverse-Z flips which end of the range is "near", so the Convert pass has
     // to dilate depth with max() instead of min() and invert its far-plane test.
     _constants.depthInverted = DepthInverted() ? 1u : 0u;
+
+    // Diagnostics: OPTI_SGSR2_DEBUG=1 swaps the output for a motion-field view.
+    const char* dbgEnv = std::getenv("OPTI_SGSR2_DEBUG");
+    _constants.debugMode = (dbgEnv != nullptr) ? (uint32_t) atoi(dbgEnv) : 0u;
 
     int reset = 0;
     InParameters->Get(NVSDK_NGX_Parameter_Reset, &reset);
@@ -622,6 +632,44 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     _hasColor = true;
     _hasDepth = true;
     _hasMV = true;
+
+    // The shader indexes the velocity texture across its full extent, so it
+    // needs the real dimensions; GetDimensions() in HLSL is not usable here.
+    {
+        auto vd = paramVelocity->GetDesc();
+        _constants.mvSize[0] = (uint32_t) vd.Width;
+        _constants.mvSize[1] = (uint32_t) vd.Height;
+
+        if (_frameCount == 0)
+        {
+            auto cd = paramColor->GetDesc();
+            LOG_INFO("Inputs: color {0}x{1} fmt {2}, mv {3}x{4} fmt {5}, render {6}x{7}", cd.Width, cd.Height,
+                     (int) cd.Format, vd.Width, vd.Height, (int) vd.Format, RenderWidth(), RenderHeight());
+
+            // NGX lets a game point the upscaler at a sub-rectangle of each
+            // input texture. A velocity texture larger than the render size
+            // does not mean the vectors are display-resolution -- it may just
+            // be an oversized allocation with the live region elsewhere. These
+            // say which it is, instead of inferring it from the texture size.
+            unsigned int mvBaseX = 0, mvBaseY = 0, colBaseX = 0, colBaseY = 0, subW = 0, subH = 0;
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &mvBaseX);
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, &mvBaseY);
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, &colBaseX);
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, &colBaseY);
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &subW);
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &subH);
+            LOG_INFO("NGX subrects: mv base ({0},{1}), color base ({2},{3}), render subrect {4}x{5}", mvBaseX, mvBaseY,
+                     colBaseX, colBaseY, subW, subH);
+        }
+    }
+
+    if (_frameCount == 0)
+    {
+        auto vd = paramVelocity->GetDesc();
+        auto cd = paramColor->GetDesc();
+        LOG_INFO("Inputs: color {0}x{1} fmt {2}, mv {3}x{4} fmt {5}, render {6}x{7}", cd.Width, cd.Height,
+                 (int) cd.Format, vd.Width, vd.Height, (int) vd.Format, RenderWidth(), RenderHeight());
+    }
     _hasOutput = true;
 
     UpdateConstants(InParameters);

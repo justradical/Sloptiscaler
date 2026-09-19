@@ -53,7 +53,9 @@
     "    uint   bSameCamera;\n"                                                                                        \
     "    uint   reset;\n"                                                                                              \
     "    uint   depthInverted;\n"                                                                                      \
-    "    uint   _sgsrPad1;\n"                                                                                          \
+    "    uint   debugMode;\n"                                                                                           \
+    "    uint2  mvSize;\n"                                                                                              \
+    "    uint2  _sgsrPad2;\n"                                                                                          \
     "};\n"                                                                                                             \
     "SamplerState PointClamp  : register(s0);\n"                                                                       \
     "SamplerState LinearClamp : register(s1);\n"
@@ -145,7 +147,70 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     //     Motion.y = +2 * mv.y / renderHeight   (D3D12: V down, clip Y up)
     // Both factors, plus NGX's MV_Scale, are folded into motionVectorScale on
     // the CPU side so the sign/scale convention lives in exactly one place.
-    float2 motion = InputVelocity.Load(int3(tid.xy, 0)).xy * motionVectorScale;
+    // NGX only guarantees the velocity texture covers the same view, not that
+    // it matches the render resolution. Hi-Fi Rush leaves
+    // NVSDK_NGX_DLSS_Feature_Flags_MVLowRes clear and supplies a full
+    // 1920x1080 buffer while rendering 1129x636, so indexing it by render-res
+    // tid samples an empty corner: measured with the motion-field debug view,
+    // 99.7% of gameplay pixels read exactly zero and nothing is ever
+    // reprojected. Rescaling the coordinate recovers the real field. This is a
+    // no-op when the two resolutions already agree.
+    // mvSize comes from the CPU rather than Texture2D::GetDimensions(): the
+    // resinfo that GetDimensions lowers to is mishandled here (Wine
+    // d3dcompiler at cs_5_0 / vkd3d-proton) and corrupts the whole dispatch --
+    // every build carrying it rendered black, even with motion forced to zero,
+    // while otherwise identical builds without it drew correctly.
+    float2 rawMv = InputVelocity.Load(int3(tid.xy, 0)).xy;   // A/B: corner read
+
+    // ~0.5% of that buffer is NaN/Inf. Motion feeds PrevUV, which feeds the
+    // history sample, which is written straight back into history -- so a
+    // single poisoned texel spreads through the temporal feedback loop and
+    // blackens the whole image within a few frames.
+    //
+    // The test is done on the raw bits on purpose. Wine's d3dcompiler has no
+    // isnan/isinf at cs_5_0, and the obvious arithmetic stand-ins (x != x, or
+    // abs(x) > 1e30) are both legal to fold away under finite-math
+    // assumptions -- measured: they were, and NaN still reached the history.
+    // An exponent-field compare is integer work the optimiser cannot discard.
+    uint2 mvBits = asuint(rawMv);
+    if (((mvBits.x & 0x7F800000u) == 0x7F800000u) || ((mvBits.y & 0x7F800000u) == 0x7F800000u))
+        rawMv = float2(0.0f, 0.0f);
+
+    // A reprojection further than one full screen is meaningless and only
+    // serves to saturate PrevUV; clamp to the NDC range.
+    float2 motion = clamp(rawMv * motionVectorScale, -2.0f, 2.0f);
+
+    // debugMode 3: classify the RAW velocity magnitude, before any scaling, so
+    // the units are read off directly instead of inferred.
+    //   red   |mv| > 1.0     -> pixel-space
+    //   green |mv| > 1e-3    -> UV / NDC-space
+    //   dim   nonzero but tiny
+    //   blue  exactly zero
+    // debugMode 4: show the full-extent sample WITHOUT using it to reproject,
+    // so the outer region can be inspected safely on a build that renders. A
+    // coherent field (smooth gradients following geometry) means it is the
+    // real display-resolution motion; per-pixel noise means it is unrelated
+    // memory and the NGX subrect is authoritative.
+    if (debugMode == 4u)
+    {
+        float2 probe = InputVelocity.Load(int3(int2(ViewportUV * float2(mvSize)), 0)).xy;
+        uint2 pb = asuint(probe);
+        if (((pb.x & 0x7F800000u) == 0x7F800000u) || ((pb.y & 0x7F800000u) == 0x7F800000u))
+            probe = float2(0.0f, 0.0f);
+        motion = clamp(probe * motionVectorScale, -2.0f, 2.0f);
+    }
+
+    if (debugMode == 3u)
+    {
+        float mag = max(abs(rawMv.x), abs(rawMv.y));
+        float3 band;
+        if (mag > 1.0f)        band = float3(1.0f, 0.0f, 0.0f);
+        else if (mag > 1.0e-3f) band = float3(0.0f, 1.0f, 0.0f);
+        else if (mag > 0.0f)    band = float3(0.3f, 0.3f, 0.3f);
+        else                    band = float3(0.0f, 0.0f, 1.0f);
+        motion = float2(band.x, band.y);
+        depthclip = band.z;
+    }
 
     float3 Colorrgb = InputColor.Load(int3(InputPos, 0)).xyz;
 
@@ -389,6 +454,35 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
         scale = ColorMax;
 
     Upsampledcw.xyz = Upsampledcw.xyz * scale;
+
+    // Motion-field visualisation. R/G are |Motion| amplified so a typical
+    // camera turn is clearly visible, and B flags pixels whose motion is
+    // exactly zero. A camera turn over static geometry should light up R/G
+    // everywhere; large flat blue regions mean the game left those pixels out
+    // of the velocity buffer, in which case the clipToPrevClip fallback that
+    // this port dropped is actually required.
+    if (debugMode != 0u)
+    {
+        float2 m = Motion;
+        float3 vis;
+        if (debugMode == 3u)
+        {
+            SceneColorOutput[tid.xy] = float4(m.x, m.y, mda.z, 1.0f);
+            return;
+        }
+        // Wine's d3dcompiler has no isnan/isinf at cs_5_0; NaN != itself, and
+        // anything past ~1e30 is Inf for our purposes.
+        bool bad = (m.x != m.x) || (m.y != m.y) || (abs(m.x) > 1.0e30f) || (abs(m.y) > 1.0e30f);
+        if (bad)
+            vis = float3(1.0f, 1.0f, 1.0f);           // white: NaN/Inf
+        else if (dot(m, m) < 1.0e-12f)
+            vis = float3(0.0f, 0.0f, 1.0f);           // blue: exactly zero
+        else
+            vis = float3(saturate(abs(m.x) * 50.0f), saturate(abs(m.y) * 50.0f), 0.0f);
+        SceneColorOutput[tid.xy] = float4(vis, 1.0f);
+        return;
+    }
+
     SceneColorOutput[tid.xy] = Upsampledcw;
 }
 )";
