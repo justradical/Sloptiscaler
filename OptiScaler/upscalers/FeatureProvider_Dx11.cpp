@@ -1,4 +1,5 @@
 #include <pch.h>
+#include "sgsr2/SGSR2Feature_Dx11on12.h"
 #include "FeatureProvider_Dx11.h"
 
 #include "Util.h"
@@ -29,6 +30,10 @@ bool FeatureProvider_Dx11::GetFeature(Upscaler upscaler, UINT handleId, NVSDK_NG
     {
     case Upscaler::XeSS:
         *feature = std::make_unique<XeSSFeature_Dx11>(handleId, parameters);
+        break;
+
+    case Upscaler::SGSR2_on12:
+        *feature = std::make_unique<SGSR2FeatureDx11on12>(handleId, parameters);
         break;
 
     case Upscaler::XeSS_on12:

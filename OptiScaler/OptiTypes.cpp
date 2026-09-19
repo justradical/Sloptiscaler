@@ -121,6 +121,7 @@ std::string UpscalerShortName(Upscaler upscaler)
         return "DLSSD";
 
     case Upscaler::SGSR2:
+    case Upscaler::SGSR2_on12:
         return "SGSR";
     }
 
@@ -156,6 +157,8 @@ std::string UpscalerToCode(Upscaler upscaler)
         return "fsr31";
     case Upscaler::SGSR2:
         return "sgsr2";
+    case Upscaler::SGSR2_on12:
+        return "sgsr2_12";
     default: // Upscaler::Reset and unknown
         return "";
     }
@@ -171,7 +174,7 @@ Upscaler CodeToUpscaler(const std::string& code)
         { "ffx", Upscaler::FFX },     { "ffx_12", Upscaler::FFX_on12 },
         { "dlss", Upscaler::DLSS },   { "dlssd", Upscaler::DLSSD },
         { "fsr31", Upscaler::FSR31 }, { "fsr31_12", Upscaler::FFX_on12 }, // for compat reasons
-        { "sgsr2", Upscaler::SGSR2 },
+        { "sgsr2", Upscaler::SGSR2 },  { "sgsr2_12", Upscaler::SGSR2_on12 },
     };
 
     auto it = mapping.find(code);
