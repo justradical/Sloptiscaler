@@ -52,7 +52,8 @@
     "    float  minLerpContribution;\n"                                                                                \
     "    uint   bSameCamera;\n"                                                                                        \
     "    uint   reset;\n"                                                                                              \
-    "    uint2  _sgsrPad1;\n"                                                                                          \
+    "    uint   depthInverted;\n"                                                                                      \
+    "    uint   _sgsrPad1;\n"                                                                                          \
     "};\n"                                                                                                             \
     "SamplerState PointClamp  : register(s0);\n"                                                                       \
     "SamplerState LinearClamp : register(s1);\n"
@@ -74,6 +75,9 @@ Texture2D<float4> InputVelocity : register(t2);
 RWTexture2D<float4> MotionDepthClipAlphaBuffer : register(u0);
 RWTexture2D<uint>   YCoCgColor                 : register(u1);
 
+// Nearest of two depths, honouring reverse-Z.
+float Nearer(float a, float b) { return (depthInverted != 0u) ? max(a, b) : min(a, b); }
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid : SV_DispatchThreadID)
 {
@@ -87,6 +91,12 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float2 ViewportUV  = gatherCoord + 0.5f * renderSizeRcp;
 
     // Nearest-depth dilation, after ffx_fsr2_reconstruct_dilated_velocity_and_previous_depth.h
+    //
+    // With reverse-Z the nearest surface is the LARGER depth value, so the
+    // reference shader's min() has to become max() and the "is anything in
+    // front of the far plane" test flips. SGSR2's README calls this out; without
+    // it depthclip is inverted, history is kept where it should be rejected, and
+    // the result ghosts. OptiScaler reports this per feature via DepthInverted().
     float4 topleft     = InputDepth.GatherRed(PointClamp, gatherCoord);
     float2 v10         = float2(renderSizeRcp.x * 2.0f, 0.0f);
     float4 topRight    = InputDepth.GatherRed(PointClamp, gatherCoord + v10);
@@ -95,16 +105,17 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float2 v14         = float2(renderSizeRcp.x * 2.0f, renderSizeRcp.y * 2.0f);
     float4 bottomRight = InputDepth.GatherRed(PointClamp, gatherCoord + v14);
 
-    float maxC        = min(min(min(topleft.y, topRight.x), bottomLeft.z), bottomRight.w);
-    float topleft4    = min(min(min(topleft.y, topleft.x), topleft.z), topleft.w);
-    float topLeftMax9 = min(bottomLeft.w, min(min(maxC, topleft4), topRight.w));
+    float maxC        = Nearer(Nearer(Nearer(topleft.y, topRight.x), bottomLeft.z), bottomRight.w);
+    float topleft4    = Nearer(Nearer(Nearer(topleft.y, topleft.x), topleft.z), topleft.w);
+    float topLeftMax9 = Nearer(bottomLeft.w, Nearer(Nearer(maxC, topleft4), topRight.w));
 
     float depthclip = 0.0f;
-    if (maxC < 1.0f - 1.0e-05f)
+    bool anyGeometry = (depthInverted != 0u) ? (maxC > 1.0e-05f) : (maxC < 1.0f - 1.0e-05f);
+    if (anyGeometry)
     {
-        float topRight4    = min(min(min(topRight.y, topRight.x), topRight.z), topRight.w);
-        float bottomLeft4  = min(min(min(bottomLeft.y, bottomLeft.x), bottomLeft.z), bottomLeft.w);
-        float bottomRight4 = min(min(min(bottomRight.y, bottomRight.x), bottomRight.z), bottomRight.w);
+        float topRight4    = Nearer(Nearer(Nearer(topRight.y, topRight.x), topRight.z), topRight.w);
+        float bottomLeft4  = Nearer(Nearer(Nearer(bottomLeft.y, bottomLeft.x), bottomLeft.z), bottomLeft.w);
+        float bottomRight4 = Nearer(Nearer(Nearer(bottomRight.y, bottomRight.x), bottomRight.z), bottomRight.w);
 
         float Wdepth              = 0.0f;
         float Ksep                = 1.37e-05f;
@@ -112,7 +123,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
         float diagonal_length     = length(float2(renderSize));
         float Ksep_Kfov_diagonal  = Ksep * Kfov * diagonal_length;
 
-        float Depthsep = Ksep_Kfov_diagonal * (1.0f - maxC);
+        float Depthsep = Ksep_Kfov_diagonal * ((depthInverted != 0u) ? maxC : (1.0f - maxC));
         float EPSILON  = 1.19e-07f;
         Wdepth += saturate(Depthsep / (abs(maxC - topleft4)     + EPSILON));
         Wdepth += saturate(Depthsep / (abs(maxC - topRight4)    + EPSILON));

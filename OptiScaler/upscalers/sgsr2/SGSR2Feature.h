@@ -34,7 +34,8 @@ struct alignas(16) SGSR2Constants
 
     uint32_t bSameCamera;
     uint32_t reset;
-    uint32_t _pad1[2];
+    uint32_t depthInverted;
+    uint32_t _pad1;
 };
 
 static_assert(sizeof(SGSR2Constants) == 144, "SGSR2Constants must match the HLSL cbuffer layout");
