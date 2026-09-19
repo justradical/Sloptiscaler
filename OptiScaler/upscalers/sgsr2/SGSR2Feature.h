@@ -52,5 +52,21 @@ class SGSR2Feature : public virtual IFeature
     feature_version Version() override { return feature_version { 2, 0, 0, 0 }; }
     Upscaler GetUpscalerType() const override { return Upscaler::SGSR2; }
 
-    SGSR2Feature(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters) : IFeature(InHandleId, InParameters) {}
+    // SGSR2 ships as shader source and has no vendor runtime to load, so the
+    // usual _moduleLoaded bookkeeping never gets set. FeatureProvider checks
+    // ModuleLoaded() right after construction and silently swaps the feature for
+    // FSR 2.1.2 when it is false, which is why SGSR2 was built and then
+    // immediately discarded. There is nothing external to load, so it is always
+    // ready.
+    bool ModuleLoaded() override { return true; }
+
+    SGSR2Feature(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters) : IFeature(InHandleId, InParameters)
+    {
+        // Each feature base is responsible for pulling the render/display
+        // resolution and init flags out of the NGX parameters. Without this the
+        // dimensions stay zero and InitInternal has nothing to size its
+        // resources from.
+        _initParameters = SetInitParameters(InParameters);
+        _moduleLoaded = true;
+    }
 };
