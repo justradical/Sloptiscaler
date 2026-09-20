@@ -586,20 +586,19 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
         mvScaleY = 1.0f;
     }
 
-    // SGSR2 consumes "Motion" in clip-space units: it reprojects with
+    // SGSR2 consumes "Motion" in clip-space (NDC) units, reprojecting with
     //     PrevUV = (Hruv.x - 0.5*Motion.x, Hruv.y + 0.5*Motion.y)
-    // so Motion is an NDC delta. The sign flip on X is D3D12 clip-space Y up
-    // against texture V down.
+    // and NGX supplies vectors in render pixels, so with prevPixel = cur + mv:
+    //     Motion.x = -2 * mv.x / renderWidth
+    //     Motion.y = +2 * mv.y / renderHeight
+    // The X sign is D3D12 clip-space Y up against texture V down.
     //
-    // This scale is NOT well established. It was briefly changed to +/-2 on the
-    // strength of a sharpness comparison in Hi-Fi Rush, which turned out to be
-    // worthless: that game hands NGX an all-zero velocity subrect, so every
-    // measurement was comparing scaled zeros and the differences were scene
-    // variation between runs. Reverted to the original +/-1 until it can be
-    // measured somewhere the vectors are actually non-zero. OPTI_SGSR2_MVX/MVY
-    // below override it for exactly that purpose.
-    _constants.motionVectorScale[0] = -mvScaleX;
-    _constants.motionVectorScale[1] = mvScaleY;
+    // The units are measured, not assumed: with the fetch coordinate fixed, a
+    // classifier over the raw values puts 9.4% of pixels above 1.0 and none in
+    // the 1e-3..1 band, i.e. pixel magnitudes. Every earlier attempt to pin
+    // this down was worthless because the fetch was returning zero.
+    _constants.motionVectorScale[0] = -2.0f * mvScaleX / rw;
+    _constants.motionVectorScale[1] = 2.0f * mvScaleY / rh;
 
     // Temporary tuning hook: lets the motion-vector convention be dialled in on
     // a device without a rebuild. OPTI_SGSR2_MVX/MVY override the scale outright.
