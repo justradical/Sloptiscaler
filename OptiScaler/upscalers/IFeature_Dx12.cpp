@@ -63,7 +63,9 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     // Those upcalers don't have their own sharpness so always need to use RCAS when sharpness is set
     auto upscaler = GetUpscalerType();
     bool useRcas = upscaler == Upscaler::XeSS ||
-                   (upscaler == Upscaler::DLSS && Version() >= feature_version(2, 5, 1)) || upscaler == Upscaler::DLSSD;
+                   (upscaler == Upscaler::DLSS && Version() >= feature_version(2, 5, 1)) ||
+                   upscaler == Upscaler::DLSSD || upscaler == Upscaler::SGSR2 ||
+                   upscaler == Upscaler::SGSR2_on12;
 
     if (!useRcas)
         useRcas = Config::Instance()->RcasEnabled.value_or_default();
