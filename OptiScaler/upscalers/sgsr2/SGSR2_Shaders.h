@@ -29,9 +29,25 @@
 // is 1:1. Worth knowing this is the usual place a GLSL->HLSL port goes wrong.
 //
 // clipToPrevClip: SGSR2 only uses it to *derive* motion where the velocity
-// texture has no encoded value (EncodedVelocity.x <= 0). OptiScaler always
-// supplies full-screen motion vectors from the upscaler inputs it intercepts,
-// so every pixel takes the velocity path and the matrix can safely be identity.
+// texture has no encoded value, detected by the sentinel EncodedVelocity.x <= 0.
+// That sentinel only means anything in Qualcomm's packed encoding, where zero
+// motion still encodes as ~0.5, so x <= 0 really does mean "never written".
+// OptiScaler intercepts DLSS/FSR/XeSS, all of which require full-screen motion
+// vectors that already include camera motion, so every pixel takes the velocity
+// path and the matrix stays identity. It could not be enabled here even if a
+// game left holes: against raw motion vectors 0.0 is a legitimate "did not
+// move", indistinguishable from "not written", so the fallback would
+// double-apply camera motion on every static pixel.
+//
+// Variant: this is the 2-pass compute version (glsl_2_pass_cs upstream). The
+// 3-pass version is deliberately not ported. Its extra pass exists to build a
+// reactive mask by differencing the final colour against an opaque-only colour
+// buffer, and that buffer is not obtainable here -- DLSS has no such input, and
+// OptiScaler drops FidelityFX's colorOpaqueOnly rather than forwarding it
+// through NGX. Without it the 3-pass split is a third full-resolution dispatch
+// that buys nothing, which is the wrong trade on the mobile GPUs this backend
+// targets. The part that does carry over -- rejecting history on reactive
+// pixels -- is applied in Upscale from the game's own reactive mask instead.
 //============================================================================================================
 
 // Shared constant buffer. Laid out in explicit float4-sized groups so the HLSL
@@ -55,7 +71,8 @@
     "    uint   depthInverted;\n"                                                                                      \
     "    uint   debugMode;\n"                                                                                           \
     "    uint2  depthSize;\n"                                                                                           \
-    "    uint2  _sgsrPad2;\n"                                                                                          \
+    "    float  reactiveStrength;\n"                                                                                    \
+    "    uint   _sgsrPad2;\n"                                                                                          \
     "};\n"                                                                                                             \
     "SamplerState PointClamp  : register(s0);\n"                                                                       \
     "SamplerState LinearClamp : register(s1);\n"
@@ -73,6 +90,9 @@ inline const char* SGSR2_ConvertShader = SGSR2_COMMON_HLSL R"(
 Texture2D<float4> InputColor    : register(t0);
 Texture2D<float>  InputDepth    : register(t1);
 Texture2D<float4> InputVelocity : register(t2);
+// Declared but unused here; Upscale is what consumes it. Both passes share a
+// root signature, so the slot has to exist in both.
+Texture2D<float4> ReactiveUnused : register(t3);
 
 RWTexture2D<float4> MotionDepthClipAlphaBuffer : register(u0);
 RWTexture2D<uint>   YCoCgColor                 : register(u1);
@@ -242,6 +262,7 @@ inline const char* SGSR2_UpscaleShader = SGSR2_COMMON_HLSL R"(
 Texture2D<float4> PrevHistoryOutput          : register(t0);
 Texture2D<float4> MotionDepthClipAlphaBuffer : register(t1);
 Texture2D<uint>   YCoCgColor                 : register(t2);
+Texture2D<float4> ReactiveMask               : register(t3);
 
 RWTexture2D<float4> SceneColorOutput : register(u0);
 RWTexture2D<float4> HistoryOutput    : register(u1);
@@ -321,6 +342,24 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float3 HistoryColor = History.xyz;
     float  Historyw     = History.w;
     float  Wfactor      = saturate(abs(Historyw));
+
+    // Reactive pixels: particles, transparencies, anything whose history is
+    // meaningless. SGSR2's 3-pass variant handles these by differencing the
+    // final colour against an opaque-only colour buffer and folding the result
+    // into Wfactor as
+    //     Wfactor = max(saturate(abs(Historyw)), alphamask)
+    // We cannot reproduce that here -- an opaque-only colour buffer is not part
+    // of the DLSS parameter surface OptiScaler intercepts, and OptiScaler drops
+    // FidelityFX's colorOpaqueOnly rather than forwarding it -- but the games
+    // that would have supplied it generally supply a reactive mask instead,
+    // which encodes the same "do not trust history here" decision the engine
+    // already made. So take that directly and apply it at the same point.
+    // reactiveStrength is 0 whenever no mask is bound, which makes this a no-op.
+    if (reactiveStrength > 0.0f)
+    {
+        float reactive = saturate(ReactiveMask.SampleLevel(LinearClamp, Jitteruv, 0.0f).x);
+        Wfactor = max(Wfactor, saturate(reactive * reactiveStrength));
+    }
 
     float4 Upsampledcw  = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float  kernelfactor = saturate(Wfactor + (float) reset);

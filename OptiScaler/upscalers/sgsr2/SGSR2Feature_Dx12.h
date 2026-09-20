@@ -35,7 +35,11 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
         SRV_PrevHistory = 0,
         SRV_MotionDepthClip = 1,
         SRV_YCoCg = 2,
-        SRV_Count = 3,
+        // t3 in both passes: the game's reactive mask where it supplies one.
+        // Only Upscale reads it; Convert declares the slot so a single root
+        // signature serves both.
+        SRV_Reactive = 3,
+        SRV_Count = 4,
     };
 
     enum UavSlot
@@ -68,6 +72,9 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
     ID3D12Resource* _outputBuffer = nullptr;
     uint32_t _historyIndex = 0;
     bool _historyValid = false;
+    // Whether the "reactive mask present / absent" line has been emitted; it is
+    // the same every frame and only useful once.
+    bool _loggedReactive = false;
 
     // GPU timing, opt-in via OPTI_SGSR2_TIMING=1.
     static constexpr uint32_t TimestampsPerFrame = 4;

@@ -25,7 +25,10 @@ struct alignas(16) SGSR2Constants
     // the D3D12 Y-sign. See the note in the Convert shader.
     float motionVectorScale[2];
 
-    float clipToPrevClip[16]; // unused while motion comes from the MV texture
+    // Always identity; kept only so the layout matches the reference cbuffer.
+    // See the note at the top of SGSR2_Shaders.h for why it cannot be anything
+    // else once the game's own motion vectors are the input.
+    float clipToPrevClip[16];
 
     float preExposure;
     float cameraFovAngleHor;
@@ -42,7 +45,10 @@ struct alignas(16) SGSR2Constants
     // The game's depth texture is often padded wider than the render size
     // (UE gives 1132x636 for a 1129x636 render), so its UVs need its own size.
     uint32_t depthSize[2];
-    uint32_t _pad2[2];
+    // Scales the reactive mask's contribution to Wfactor. Zero when the game
+    // supplies no mask, which is the common case. See the note in Upscale.
+    float reactiveStrength;
+    uint32_t _pad2;
 };
 
 static_assert(sizeof(SGSR2Constants) == 160, "SGSR2Constants must match the HLSL cbuffer layout");

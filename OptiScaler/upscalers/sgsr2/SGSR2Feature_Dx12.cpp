@@ -891,6 +891,16 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     if (InParameters->Get(NVSDK_NGX_Parameter_Output, &paramOutput) != NVSDK_NGX_Result_Success)
         InParameters->Get(NVSDK_NGX_Parameter_Output, (void**) &paramOutput);
 
+    // Optional. Most games never set it, and OptiScaler disables it by default,
+    // so treat its absence as normal rather than as a missing input.
+    ID3D12Resource* paramReactive = nullptr;
+    if (!Config::Instance()->DisableReactiveMask.value_or(true))
+    {
+        if (InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, &paramReactive) !=
+            NVSDK_NGX_Result_Success)
+            InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, (void**) &paramReactive);
+    }
+
     if (paramColor == nullptr || paramDepth == nullptr || paramVelocity == nullptr || paramOutput == nullptr)
     {
         LOG_ERROR("Missing inputs: color {0}, depth {1}, mv {2}, output {3}", paramColor != nullptr,
@@ -953,6 +963,38 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     }
     _hasOutput = true;
 
+    // Must be settled before UpdateConstants: that is where _constants is
+    // memcpy'd into the mapped upload buffer for this frame's ring slot.
+    //
+    // A null SRV is a valid descriptor and reads as zero, so an absent mask
+    // needs no special case beyond leaving reactiveStrength at zero.
+    DXGI_FORMAT reactiveFormat = DXGI_FORMAT_R8_UNORM;
+    if (paramReactive != nullptr)
+    {
+        reactiveFormat = ResolveFormat(paramReactive->GetDesc().Format);
+        // Reuse DLSS's existing reactive-mask knob rather than adding another.
+        // 0.35 matches the scale SGSR2's 3-pass variant applies to its own
+        // opaque-difference mask (0.35 * 1000 stored, * 0.001 on read).
+        const float bias = Config::Instance()->DlssReactiveMaskBias.value_or_default();
+        _constants.reactiveStrength = bias > 0.0f ? bias : 0.35f;
+    }
+    else
+    {
+        _constants.reactiveStrength = 0.0f;
+    }
+
+    // Logged once: whether a game supplies a reactive mask is the thing that
+    // decides if this path ever does anything, and it is not visible otherwise.
+    if (!_loggedReactive)
+    {
+        _loggedReactive = true;
+        LOG_INFO("Reactive mask: {0} (strength {1})",
+                 paramReactive != nullptr
+                     ? "present"
+                     : (Config::Instance()->DisableReactiveMask.value_or(true) ? "disabled by config" : "not supplied"),
+                 _constants.reactiveStrength);
+    }
+
     UpdateConstants(InParameters);
 
     // The game's resources arrive in whatever state it left them in; OptiScaler
@@ -968,6 +1010,11 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     ResourceBarrier(InCommandList, paramVelocity, (D3D12_RESOURCE_STATES) mvState,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    if (paramReactive != nullptr && Config::Instance()->MaskResourceBarrier.has_value())
+        ResourceBarrier(InCommandList, paramReactive,
+                        (D3D12_RESOURCE_STATES) Config::Instance()->MaskResourceBarrier.value(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     if (_constants.debugMode == 5u)
         DumpVelocity(InCommandList, paramVelocity);
@@ -987,10 +1034,11 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
     // ---------------------------------------------------------------- Pass 1
     {
-        ID3D12Resource* srvs[SRV_Count] = { paramColor, paramDepth, paramVelocity };
+        ID3D12Resource* srvs[SRV_Count] = { paramColor, paramDepth, paramVelocity, paramReactive };
         DXGI_FORMAT srvFormats[SRV_Count] = { ResolveFormat(paramColor->GetDesc().Format),
                                               ResolveFormat(paramDepth->GetDesc().Format),
-                                              ResolveFormat(paramVelocity->GetDesc().Format) };
+                                              ResolveFormat(paramVelocity->GetDesc().Format),
+                                              reactiveFormat };
 
         ID3D12Resource* uavs[UAV_Count] = { _motionDepthClipAlpha, _ycocgColor, _motionCounter };
         DXGI_FORMAT uavFormats[UAV_Count] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32_UINT,
@@ -1042,9 +1090,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
     // ---------------------------------------------------------------- Pass 2
     {
-        ID3D12Resource* srvs[SRV_Count] = { prevHistory, _motionDepthClipAlpha, _ycocgColor };
+        ID3D12Resource* srvs[SRV_Count] = { prevHistory, _motionDepthClipAlpha, _ycocgColor, paramReactive };
         DXGI_FORMAT srvFormats[SRV_Count] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
-                                              DXGI_FORMAT_R32_UINT };
+                                              DXGI_FORMAT_R32_UINT, reactiveFormat };
 
         // Writing straight into the game's output avoids a full display-resolution
         // copy every frame (~16 MB at 1080p RGBA16F), which is a large cost on a
