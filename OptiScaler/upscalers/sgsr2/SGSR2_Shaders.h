@@ -54,7 +54,7 @@
     "    uint   reset;\n"                                                                                              \
     "    uint   depthInverted;\n"                                                                                      \
     "    uint   debugMode;\n"                                                                                           \
-    "    uint2  _sgsrPad1;\n"                                                                                          \
+    "    uint2  depthSize;\n"                                                                                           \
     "    uint2  _sgsrPad2;\n"                                                                                          \
     "};\n"                                                                                                             \
     "SamplerState PointClamp  : register(s0);\n"                                                                       \
@@ -99,13 +99,21 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     // front of the far plane" test flips. SGSR2's README calls this out; without
     // it depthclip is inverted, history is kept where it should be rejected, and
     // the result ghosts. OptiScaler reports this per feature via DepthInverted().
-    float4 topleft     = InputDepth.GatherRed(PointClamp, gatherCoord);
-    float2 v10         = float2(renderSizeRcp.x * 2.0f, 0.0f);
-    float4 topRight    = InputDepth.GatherRed(PointClamp, gatherCoord + v10);
-    float2 v12         = float2(0.0f, renderSizeRcp.y * 2.0f);
-    float4 bottomLeft  = InputDepth.GatherRed(PointClamp, gatherCoord + v12);
-    float2 v14         = float2(renderSizeRcp.x * 2.0f, renderSizeRcp.y * 2.0f);
-    float4 bottomRight = InputDepth.GatherRed(PointClamp, gatherCoord + v14);
+    // Gather against the depth texture's own size, not the render size. UE pads
+    // render targets -- 1132x636 backing a 1129x636 render -- so UVs built from
+    // renderSizeRcp address a 1132-wide texture as if it were 1129 wide and
+    // drift up to three texels right by the screen edge. Depth then no longer
+    // lines up with colour, and depthclip, which is what rejects stale history,
+    // is computed from the wrong surface.
+    float2 depthRcp    = float2(1.0f / float(depthSize.x), 1.0f / float(depthSize.y));
+    float2 depthCoord  = float2(tid.xy) * depthRcp;
+    float4 topleft     = InputDepth.GatherRed(PointClamp, depthCoord);
+    float2 v10         = float2(depthRcp.x * 2.0f, 0.0f);
+    float4 topRight    = InputDepth.GatherRed(PointClamp, depthCoord + v10);
+    float2 v12         = float2(0.0f, depthRcp.y * 2.0f);
+    float4 bottomLeft  = InputDepth.GatherRed(PointClamp, depthCoord + v12);
+    float2 v14         = float2(depthRcp.x * 2.0f, depthRcp.y * 2.0f);
+    float4 bottomRight = InputDepth.GatherRed(PointClamp, depthCoord + v14);
 
     float maxC        = Nearer(Nearer(Nearer(topleft.y, topRight.x), bottomLeft.z), bottomRight.w);
     float topleft4    = Nearer(Nearer(Nearer(topleft.y, topleft.x), topleft.z), topleft.w);

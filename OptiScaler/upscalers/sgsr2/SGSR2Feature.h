@@ -39,7 +39,9 @@ struct alignas(16) SGSR2Constants
     // visualisation of the motion field, so a sparse or mis-scaled velocity
     // buffer can be seen directly instead of inferred from smearing.
     uint32_t debugMode;
-    uint32_t _pad1[2];
+    // The game's depth texture is often padded wider than the render size
+    // (UE gives 1132x636 for a 1129x636 render), so its UVs need its own size.
+    uint32_t depthSize[2];
     uint32_t _pad2[2];
 };
 

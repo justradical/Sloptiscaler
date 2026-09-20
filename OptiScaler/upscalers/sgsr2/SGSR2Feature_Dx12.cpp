@@ -775,6 +775,10 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
     {
         auto vd = paramVelocity->GetDesc();
+        auto ddesc = paramDepth->GetDesc();
+        _constants.depthSize[0] = (uint32_t) ddesc.Width;
+        _constants.depthSize[1] = (uint32_t) ddesc.Height;
+
         if (_frameCount == 0)
         {
             auto cd = paramColor->GetDesc();
