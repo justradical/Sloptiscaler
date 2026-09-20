@@ -597,6 +597,11 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
     // classifier over the raw values puts 9.4% of pixels above 1.0 and none in
     // the 1e-3..1 band, i.e. pixel magnitudes. Every earlier attempt to pin
     // this down was worthless because the fetch was returning zero.
+    //
+    // The Y sign is measured too. Walking forward makes the camera follow, so
+    // screen flow is radial and Y is exercised without needing a vertical
+    // camera move. Same walk, same save, detail retained in motion relative to
+    // a still frame: +2/h keeps 1.05, -2/h keeps 0.56.
     _constants.motionVectorScale[0] = -2.0f * mvScaleX / rw;
     _constants.motionVectorScale[1] = 2.0f * mvScaleY / rh;
 
