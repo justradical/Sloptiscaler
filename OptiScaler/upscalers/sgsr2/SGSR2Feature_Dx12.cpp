@@ -736,13 +736,9 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
     // the single place that convention lives. Report it once so a smeared or
     // doubled image can be diagnosed without guessing.
     if (_frameCount == 0)
-    {
         LOG_INFO("MV convention: NGX MV_Scale=({0}, {1}) render={2}x{3} -> motionVectorScale=({4}, {5})", mvScaleX,
                  mvScaleY, RenderWidth(), RenderHeight(), _constants.motionVectorScale[0],
                  _constants.motionVectorScale[1]);
-        LOG_INFO("  flags: DepthInverted={0} JitteredMV={1} LowResMV={2} AutoExposure={3} preExposure={4}",
-                 DepthInverted(), JitteredMV(), LowResMV(), AutoExposure(), _constants.preExposure);
-    }
 
     // Unused while motion comes from the MV texture, but keep it a well-formed
     // identity so the shader's fallback path can never produce garbage.
@@ -758,6 +754,14 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
         exposure == 0.0f)
         exposure = 1.0f;
     _constants.preExposure = exposure;
+
+    // Logged here rather than with the MV line above: preExposure is only
+    // settled on the line before this, so reporting it earlier printed the
+    // previous frame's value -- zero on the first frame, which reads as a
+    // black-output bug that is not there.
+    if (_frameCount == 0)
+        LOG_INFO("  flags: DepthInverted={0} JitteredMV={1} LowResMV={2} AutoExposure={3} preExposure={4}",
+                 DepthInverted(), JitteredMV(), LowResMV(), AutoExposure(), _constants.preExposure);
 
     // DLSS carries neither FOV nor the near plane, so OptiScaler exposes its own
     // keys for games that can supply them and falls back to the same user config
@@ -777,8 +781,9 @@ bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
 
     _constants.minLerpContribution = 0.3f;
 
-    // Nine-tap neighbourhood only pays off when the camera is still; without a
-    // previous view-projection the best available proxy is the reset flag.
+    // The nine-tap neighbourhood only pays off when the camera is still. There
+    // is no previous view-projection to compare against, so this comes from the
+    // motion counter the Convert pass fills -- see UpdateSameCamera.
     _constants.bSameCamera = _sameCamera ? 1u : 0u;
 
     // Reverse-Z flips which end of the range is "near", so the Convert pass has
