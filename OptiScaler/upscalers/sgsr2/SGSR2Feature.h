@@ -39,9 +39,7 @@ struct alignas(16) SGSR2Constants
     // visualisation of the motion field, so a sparse or mis-scaled velocity
     // buffer can be seen directly instead of inferred from smearing.
     uint32_t debugMode;
-    // Dimensions of the game's velocity texture. Passed in because
-    // GetDimensions() is unusable on this stack (see SGSR2_Shaders.h).
-    uint32_t mvSize[2];
+    uint32_t _pad1[2];
     uint32_t _pad2[2];
 };
 

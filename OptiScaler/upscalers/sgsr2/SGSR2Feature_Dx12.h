@@ -83,6 +83,19 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
 
     void ResolveTimestamps(ID3D12GraphicsCommandList* InCommandList);
 
+    // OPTI_SGSR2_DEBUG=5: copy the velocity texture to system memory once and
+    // report what is in it, split by the NGX subrect. A shader reading zero and
+    // a texture containing zero are indistinguishable from the GPU side.
+    ID3D12Resource* _mvReadback = nullptr;
+    uint64_t _mvReadbackPitch = 0;
+    uint32_t _mvReadbackW = 0;
+    uint32_t _mvReadbackH = 0;
+    DXGI_FORMAT _mvReadbackFormat = DXGI_FORMAT_UNKNOWN;
+    int _mvReadbackState = 0;
+    uint32_t _mvReadbackFrame = 0;
+
+    void DumpVelocity(ID3D12GraphicsCommandList* InCommandList, ID3D12Resource* velocity);
+
     bool CreatePipelines(ID3D12Device* device);
     bool CreateResources(ID3D12Device* device);
     void ReleaseResources();

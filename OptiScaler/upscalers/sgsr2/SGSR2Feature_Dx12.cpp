@@ -411,6 +411,147 @@ D3D12_GPU_DESCRIPTOR_HANDLE SGSR2FeatureDx12::BindPass(ID3D12Device* device, uin
     return gpu;
 }
 
+
+// Copy the game's velocity texture into system memory and report what is in it.
+// SGSR2 reading zero motion and the game supplying an empty buffer look
+// identical from inside a shader, and that ambiguity cost a lot of time: the
+// motion-field debug view showed 99.5% of pixels at exactly zero in Hi-Fi Rush
+// and 100% in Baldur's Gate 3, which reads as "no game gives us motion" when it
+// actually means "we cannot read what we were given".
+//
+// The counts are split by the NGX subrect because the declared valid region and
+// the rest of an oversized allocation can differ.
+void SGSR2FeatureDx12::DumpVelocity(ID3D12GraphicsCommandList* InCommandList, ID3D12Resource* velocity)
+{
+    auto desc = velocity->GetDesc();
+
+    if (_mvReadbackState == 0)
+    {
+        if (_frameCount < 90) // let the game settle into rendering
+            return;
+
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp {};
+        UINT64 bytes = 0;
+        Device->GetCopyableFootprints(&desc, 0, 1, 0, &fp, nullptr, nullptr, &bytes);
+
+        D3D12_HEAP_PROPERTIES hp {};
+        hp.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC rb {};
+        rb.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        rb.Width = bytes;
+        rb.Height = 1;
+        rb.DepthOrArraySize = 1;
+        rb.MipLevels = 1;
+        rb.Format = DXGI_FORMAT_UNKNOWN;
+        rb.SampleDesc.Count = 1;
+        rb.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        if (FAILED(Device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rb, D3D12_RESOURCE_STATE_COPY_DEST,
+                                                   nullptr, IID_PPV_ARGS(&_mvReadback))))
+        {
+            LOG_WARN("velocity readback: allocation failed");
+            _mvReadbackState = 2;
+            return;
+        }
+
+        _mvReadbackPitch = fp.Footprint.RowPitch;
+        _mvReadbackW = fp.Footprint.Width;
+        _mvReadbackH = fp.Footprint.Height;
+        _mvReadbackFormat = desc.Format;
+
+        D3D12_TEXTURE_COPY_LOCATION src {};
+        src.pResource = velocity;
+        src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        D3D12_TEXTURE_COPY_LOCATION dst {};
+        dst.pResource = _mvReadback;
+        dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dst.PlacedFootprint = fp;
+
+        ResourceBarrier(InCommandList, velocity, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE);
+        InCommandList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        ResourceBarrier(InCommandList, velocity, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        _mvReadbackState = 1;
+        _mvReadbackFrame = _frameCount;
+        return;
+    }
+
+    if (_mvReadbackState != 1 || _frameCount < _mvReadbackFrame + FrameRingDepth + 2)
+        return;
+
+    _mvReadbackState = 2;
+
+    void* mapped = nullptr;
+    if (FAILED(_mvReadback->Map(0, nullptr, &mapped)) || mapped == nullptr)
+    {
+        LOG_WARN("velocity readback: map failed");
+        return;
+    }
+
+    const bool isHalf = (_mvReadbackFormat == DXGI_FORMAT_R16G16_FLOAT);
+    const bool isFloat = (_mvReadbackFormat == DXGI_FORMAT_R32G32_FLOAT);
+    const uint32_t texel = isHalf ? 4 : (isFloat ? 8 : 0);
+
+    auto halfToFloat = [](uint16_t v)
+    {
+        uint32_t sign = (v >> 15) & 1, exp = (v >> 10) & 0x1F, man = v & 0x3FF;
+        if (exp == 0)
+            return 0.0f;
+        uint32_t f = (sign << 31) | ((exp - 15 + 127) << 23) | (man << 13);
+        float out;
+        memcpy(&out, &f, 4);
+        return out;
+    };
+
+    const uint32_t rw = RenderWidth(), rh = RenderHeight();
+    uint64_t nz = 0, tot = 0, cnz = 0, ctot = 0;
+    float lo = 1e30f, hi = -1e30f;
+
+    for (uint32_t y = 0; texel && y < _mvReadbackH; y += 4)
+    {
+        const uint8_t* row = (const uint8_t*) mapped + (uint64_t) y * _mvReadbackPitch;
+        for (uint32_t x = 0; x < _mvReadbackW; x += 4)
+        {
+            float vx, vy;
+            if (isFloat)
+            {
+                const float* p = (const float*) (row + (uint64_t) x * texel);
+                vx = p[0];
+                vy = p[1];
+            }
+            else
+            {
+                const uint16_t* h = (const uint16_t*) (row + (uint64_t) x * texel);
+                vx = halfToFloat(h[0]);
+                vy = halfToFloat(h[1]);
+            }
+
+            const bool corner = (x < rw && y < rh);
+            tot++;
+            if (corner)
+                ctot++;
+            if (vx != 0.0f || vy != 0.0f)
+            {
+                nz++;
+                lo = std::min(lo, std::min(vx, vy));
+                hi = std::max(hi, std::max(vx, vy));
+                if (corner)
+                    cnz++;
+            }
+        }
+    }
+
+    D3D12_RANGE noWrite { 0, 0 };
+    _mvReadback->Unmap(0, &noWrite);
+
+    LOG_INFO("velocity readback: {0}x{1} fmt {2} -- whole {3}/{4} non-zero, NGX subrect {5}x{6} {7}/{8} non-zero, "
+             "range [{9}, {10}]",
+             _mvReadbackW, _mvReadbackH, (int) _mvReadbackFormat, nz, tot, rw, rh, cnz, ctot, lo, hi);
+}
+
+
 bool SGSR2FeatureDx12::UpdateConstants(NVSDK_NGX_Parameter* InParameters)
 {
     const float rw = (float) RenderWidth();
@@ -633,13 +774,8 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     _hasDepth = true;
     _hasMV = true;
 
-    // The shader indexes the velocity texture across its full extent, so it
-    // needs the real dimensions; GetDimensions() in HLSL is not usable here.
     {
         auto vd = paramVelocity->GetDesc();
-        _constants.mvSize[0] = (uint32_t) vd.Width;
-        _constants.mvSize[1] = (uint32_t) vd.Height;
-
         if (_frameCount == 0)
         {
             auto cd = paramColor->GetDesc();
@@ -687,6 +823,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     ResourceBarrier(InCommandList, paramVelocity, (D3D12_RESOURCE_STATES) mvState,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    if (_constants.debugMode == 5u)
+        DumpVelocity(InCommandList, paramVelocity);
 
     ID3D12Resource* prevHistory = _history[_historyIndex];
     ID3D12Resource* nextHistory = _history[_historyIndex ^ 1];
@@ -893,6 +1032,7 @@ void SGSR2FeatureDx12::ReleaseResources()
         _constantBufferMapped = nullptr;
     }
 
+    release(_mvReadback);
     release(_timestampHeap);
     release(_timestampReadback);
     release(_constantBuffer);
