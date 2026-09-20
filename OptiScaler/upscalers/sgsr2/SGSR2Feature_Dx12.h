@@ -40,7 +40,9 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
 
     enum UavSlot
     {
-        UAV_Count = 2,
+        // u2 is the motion counter used to detect a static camera; pass 2 binds
+        // it too so both passes share one root signature.
+        UAV_Count = 3,
     };
 
     // Descriptors consumed per frame: one SRV+UAV set per pass.
@@ -82,6 +84,22 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
     uint32_t _timingWallSamples = 0;
 
     void ResolveTimestamps(ID3D12GraphicsCommandList* InCommandList);
+
+    // Static-camera detection. SGSR2 widens its neighbourhood from five taps to
+    // nine when the camera has not moved, which is the case where the extra
+    // samples are worth paying for. The reference has the application supply
+    // that flag; OptiScaler is not given camera matrices (OptiKeys carries FOV
+    // and the planes, no view-projection), so it is derived from the motion
+    // field: a sparse sample of pixels is counted on the GPU and read back a
+    // few frames later, with no stall.
+    ID3D12Resource* _motionCounter = nullptr;
+    ID3D12Resource* _motionCounterReadback = nullptr;
+    ID3D12DescriptorHeap* _clearHeap = nullptr; // non-shader-visible, for ClearUAV
+    uint32_t _sameCameraFrames = 0;
+    float _lastMovingFraction = 1.0f;
+    float _maxMovingFraction = 0.0f;
+
+    void UpdateSameCamera(ID3D12GraphicsCommandList* InCommandList);
 
     // OPTI_SGSR2_DEBUG=5: copy the velocity texture to system memory once and
     // report what is in it, split by the NGX subrect. A shader reading zero and

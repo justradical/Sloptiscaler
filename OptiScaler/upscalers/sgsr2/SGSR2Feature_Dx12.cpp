@@ -312,8 +312,113 @@ bool SGSR2FeatureDx12::CreateResources(ID3D12Device* device)
         }
     }
 
+    // Static-camera detection resources. The counter is cleared each frame,
+    // added to by the Convert pass, and copied into a ring slot so the value can
+    // be read back once the frame that wrote it has retired.
+    {
+        D3D12_HEAP_PROPERTIES defHeap {};
+        defHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        D3D12_RESOURCE_DESC cd {};
+        cd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        cd.Width = sizeof(uint32_t);
+        cd.Height = 1;
+        cd.DepthOrArraySize = 1;
+        cd.MipLevels = 1;
+        cd.Format = DXGI_FORMAT_UNKNOWN;
+        cd.SampleDesc.Count = 1;
+        cd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        cd.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        D3D12_HEAP_PROPERTIES rbHeap {};
+        rbHeap.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC rd = cd;
+        rd.Width = sizeof(uint32_t) * FrameRingDepth;
+        rd.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        D3D12_DESCRIPTOR_HEAP_DESC ch {};
+        ch.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        ch.NumDescriptors = 1;
+        ch.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // ClearUAV needs a non-shader-visible handle
+
+        if (FAILED(device->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &cd,
+                                                   D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                                   IID_PPV_ARGS(&_motionCounter))) ||
+            FAILED(device->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &rd,
+                                                   D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                   IID_PPV_ARGS(&_motionCounterReadback))) ||
+            FAILED(device->CreateDescriptorHeap(&ch, IID_PPV_ARGS(&_clearHeap))))
+        {
+            LOG_WARN("Static-camera detection unavailable; the nine-tap path stays off");
+            if (_motionCounter) { _motionCounter->Release(); _motionCounter = nullptr; }
+            if (_motionCounterReadback) { _motionCounterReadback->Release(); _motionCounterReadback = nullptr; }
+            if (_clearHeap) { _clearHeap->Release(); _clearHeap = nullptr; }
+        }
+        else
+        {
+            _motionCounter->SetName(L"SGSR2_MotionCounter");
+            D3D12_UNORDERED_ACCESS_VIEW_DESC ud {};
+            ud.Format = DXGI_FORMAT_R32_UINT;
+            ud.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            ud.Buffer.NumElements = 1;
+            device->CreateUnorderedAccessView(_motionCounter, nullptr, &ud,
+                                              _clearHeap->GetCPUDescriptorHandleForHeapStart());
+        }
+    }
+
     _historyValid = false;
     return true;
+}
+
+// Decide whether the camera is holding still, from how many sampled pixels the
+// Convert pass found in motion. Read a ring slot older than the frames in
+// flight, so nothing has to be waited on.
+void SGSR2FeatureDx12::UpdateSameCamera(ID3D12GraphicsCommandList* InCommandList)
+{
+    if (_motionCounter == nullptr)
+        return;
+
+    const uint32_t slot = _ringIndex;
+
+    if (_frameCount >= FrameRingDepth)
+    {
+        void* mapped = nullptr;
+        D3D12_RANGE r { (SIZE_T) slot * sizeof(uint32_t), (SIZE_T) (slot + 1) * sizeof(uint32_t) };
+        if (SUCCEEDED(_motionCounterReadback->Map(0, &r, &mapped)) && mapped != nullptr)
+        {
+            uint32_t moving = 0;
+            memcpy(&moving, (const uint8_t*) mapped + r.Begin, sizeof(moving));
+            D3D12_RANGE noWrite { 0, 0 };
+            _motionCounterReadback->Unmap(0, &noWrite);
+
+            // Sampled points are one per 8x8 block.
+            const uint32_t sampled = DivRoundUp(RenderWidth(), 8) * DivRoundUp(RenderHeight(), 8);
+            const float fraction = sampled > 0 ? (float) moving / (float) sampled : 1.0f;
+
+            // A little movement is always present -- animated props, foliage,
+            // a character idling -- so the test is for a mostly-still frame
+            // rather than a perfectly still one.
+            if (fraction < 0.02f)
+                _sameCameraFrames++;
+            else
+                _sameCameraFrames = 0;
+
+            _lastMovingFraction = fraction;
+            _maxMovingFraction = std::max(_maxMovingFraction, fraction);
+        }
+    }
+
+    _sameCamera = _sameCameraFrames > 1; // one settled frame before widening
+
+    // Clear for this frame, then hand the value to the readback ring.
+    if (_clearHeap != nullptr)
+    {
+        auto gpu = _descriptorHeap->GetGPUDescriptorHandleForHeapStart();
+        gpu.ptr += (UINT64) ((_ringIndex * DescriptorsPerFrame) + SRV_Count + 2) * _descriptorSize;
+        const UINT zero[4] = { 0, 0, 0, 0 };
+        InCommandList->ClearUnorderedAccessViewUint(gpu, _clearHeap->GetCPUDescriptorHandleForHeapStart(),
+                                                    _motionCounter, zero, 0, nullptr);
+    }
 }
 
 void SGSR2FeatureDx12::ResolveTimestamps(ID3D12GraphicsCommandList* InCommandList)
@@ -357,10 +462,13 @@ void SGSR2FeatureDx12::ResolveTimestamps(ID3D12GraphicsCommandList* InCommandLis
             const double cost = (_timingPass1Ms + _timingPass2Ms) / n;
 
             LOG_INFO("SGSR2 {0}x{1} -> {2}x{3} over {4} frames: convert {5:.3f} + upscale {6:.3f} = {7:.3f} ms/frame "
-                     "GPU (worst {8:.3f}); frame {9:.2f} ms = {10:.1f} fps, upscaler is {11:.1f}% of it",
+                     "GPU (worst {8:.3f}); frame {9:.2f} ms = {10:.1f} fps, upscaler is {11:.1f}% of it"
+                     " | staticCamera={12} ({13} settled, moving now {14:.3f} peak {15:.3f})",
                      RenderWidth(), RenderHeight(), TargetWidth(), TargetHeight(), _timingSamples,
                      _timingPass1Ms / n, _timingPass2Ms / n, cost, _timingWorstMs, wall,
-                     wall > 0.0 ? 1000.0 / wall : 0.0, wall > 0.0 ? 100.0 * cost / wall : 0.0);
+                     wall > 0.0 ? 1000.0 / wall : 0.0, wall > 0.0 ? 100.0 * cost / wall : 0.0, _sameCamera,
+                     _sameCameraFrames, _lastMovingFraction, _maxMovingFraction);
+            _maxMovingFraction = 0.0f;
 
             _timingPass1Ms = 0.0;
             _timingPass2Ms = 0.0;
@@ -402,9 +510,21 @@ D3D12_GPU_DESCRIPTOR_HANDLE SGSR2FeatureDx12::BindPass(ID3D12Device* device, uin
     for (uint32_t i = 0; i < UAV_Count; i++)
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC desc {};
-        desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
         desc.Format = uavFormats[i];
-        device->CreateUnorderedAccessView(uavs[i], nullptr, &desc, cursor);
+
+        // The motion counter is a buffer; everything else here is a texture.
+        if (uavs[i] != nullptr && uavs[i]->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
+        {
+            desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            desc.Buffer.NumElements = 1;
+        }
+        else
+        {
+            desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        }
+
+        if (uavs[i] != nullptr)
+            device->CreateUnorderedAccessView(uavs[i], nullptr, &desc, cursor);
         cursor.ptr += _descriptorSize;
     }
 
@@ -784,6 +904,18 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         _constants.depthSize[0] = (uint32_t) ddesc.Width;
         _constants.depthSize[1] = (uint32_t) ddesc.Height;
 
+        // OPTI_SGSR2_NODEPTHFIX=1 feeds the render size instead, reproducing
+        // the old mismatched gather exactly, so the depth alignment fix can be
+        // A/B'd from a launch option without swapping builds.
+        if (const char* e = std::getenv("OPTI_SGSR2_NODEPTHFIX"))
+        {
+            if (e[0] == '1')
+            {
+                _constants.depthSize[0] = RenderWidth();
+                _constants.depthSize[1] = RenderHeight();
+            }
+        }
+
         if (_frameCount == 0)
         {
             auto cd = paramColor->GetDesc();
@@ -835,6 +967,8 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     if (_constants.debugMode == 5u)
         DumpVelocity(InCommandList, paramVelocity);
 
+    UpdateSameCamera(InCommandList);
+
     ID3D12Resource* prevHistory = _history[_historyIndex];
     ID3D12Resource* nextHistory = _history[_historyIndex ^ 1];
 
@@ -853,8 +987,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
                                               ResolveFormat(paramDepth->GetDesc().Format),
                                               ResolveFormat(paramVelocity->GetDesc().Format) };
 
-        ID3D12Resource* uavs[UAV_Count] = { _motionDepthClipAlpha, _ycocgColor };
-        DXGI_FORMAT uavFormats[UAV_Count] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32_UINT };
+        ID3D12Resource* uavs[UAV_Count] = { _motionDepthClipAlpha, _ycocgColor, _motionCounter };
+        DXGI_FORMAT uavFormats[UAV_Count] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32_UINT,
+                                              DXGI_FORMAT_R32_UINT };
 
         auto table = BindPass(Device, 0, srvs, srvFormats, uavs, uavFormats);
 
@@ -913,10 +1048,10 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
         const bool directToOutput = (paramOutput->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0;
         ID3D12Resource* finalTarget = directToOutput ? paramOutput : _outputBuffer;
 
-        ID3D12Resource* uavs[UAV_Count] = { finalTarget, nextHistory };
+        ID3D12Resource* uavs[UAV_Count] = { finalTarget, nextHistory, _motionCounter };
         DXGI_FORMAT uavFormats[UAV_Count] = { directToOutput ? ResolveFormat(paramOutput->GetDesc().Format)
                                                              : DXGI_FORMAT_R16G16B16A16_FLOAT,
-                                              DXGI_FORMAT_R16G16B16A16_FLOAT };
+                                              DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32_UINT };
 
         if (directToOutput)
         {
@@ -1012,6 +1147,23 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     ResourceBarrier(InCommandList, paramVelocity, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                     (D3D12_RESOURCE_STATES) mvState);
 
+    if (_motionCounter != nullptr)
+    {
+        D3D12_RESOURCE_BARRIER toCopy {};
+        toCopy.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        toCopy.Transition.pResource = _motionCounter;
+        toCopy.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        toCopy.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        toCopy.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        InCommandList->ResourceBarrier(1, &toCopy);
+
+        InCommandList->CopyBufferRegion(_motionCounterReadback, (UINT64) _ringIndex * sizeof(uint32_t),
+                                        _motionCounter, 0, sizeof(uint32_t));
+
+        std::swap(toCopy.Transition.StateBefore, toCopy.Transition.StateAfter);
+        InCommandList->ResourceBarrier(1, &toCopy);
+    }
+
     if (_timingEnabled)
         ResolveTimestamps(InCommandList);
 
@@ -1040,6 +1192,9 @@ void SGSR2FeatureDx12::ReleaseResources()
         _constantBufferMapped = nullptr;
     }
 
+    release(_motionCounter);
+    release(_motionCounterReadback);
+    release(_clearHeap);
     release(_mvReadback);
     release(_timestampHeap);
     release(_timestampReadback);

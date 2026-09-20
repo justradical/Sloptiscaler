@@ -76,6 +76,9 @@ Texture2D<float4> InputVelocity : register(t2);
 
 RWTexture2D<float4> MotionDepthClipAlphaBuffer : register(u0);
 RWTexture2D<uint>   YCoCgColor                 : register(u1);
+// One counter of how many sampled pixels are moving, used to spot a static
+// camera. See UpdateSameCamera on the host side.
+RWBuffer<uint>      MotionCounter              : register(u2);
 
 // Nearest of two depths, honouring reverse-Z.
 float Nearer(float a, float b) { return (depthInverted != 0u) ? max(a, b) : min(a, b); }
@@ -204,6 +207,22 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
 
     YCoCgColor[tid.xy] = ((x11 << 21u) | (y11 << 10u)) | z10;
     MotionDepthClipAlphaBuffer[tid.xy] = float4(motion, depthclip, ColorMax);
+
+    // One sample per 8x8 block -- about 11k points spread over the frame, which
+    // is ample to tell a moving camera from a still one, and cheap enough to
+    // avoid a group-shared reduction. A reduction would also need barriers that
+    // the early-out above makes unsafe, since returned threads never reach them.
+    if (((tid.x & 7u) == 0u) && ((tid.y & 7u) == 0u))
+    {
+        // A pixel counts as moving at more than ~1/8 pixel of travel, which is
+        // below anything visible but above jitter and numerical noise.
+        float2 pixels = motion * 0.5f * float2(renderSize);
+        if (dot(pixels, pixels) > 0.015f)
+        {
+            uint prev;
+            InterlockedAdd(MotionCounter[0], 1u, prev);
+        }
+    }
 }
 )";
 
@@ -226,6 +245,7 @@ Texture2D<uint>   YCoCgColor                 : register(t2);
 
 RWTexture2D<float4> SceneColorOutput : register(u0);
 RWTexture2D<float4> HistoryOutput    : register(u1);
+RWBuffer<uint>      MotionCounterUnused : register(u2); // shared root signature
 
 float FastLanczos(float base)
 {
