@@ -440,3 +440,14 @@ CyberFSR/imgui.ini
 /OptiScaler/resource_build_commit.h
 /OptiScaler/misc/Telemetry.cpp
 /OptiScaler/misc/Telemetry.h
+
+# --- ARM64EC port ---------------------------------------------------------
+# Toolchain and build tree fetched/produced by arm64ec/build.sh. Large, fully
+# reproducible, and must never reach a patch.
+/arm64ec-deps/
+
+# Logs and shader dumps games and vkd3d drop next to the binaries.
+OptiScaler*.log
+*.spv
+*.dxbc
+vkd3d-shader-*
