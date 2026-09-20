@@ -1,0 +1,5 @@
+# patches/ is generated from this branch's history by git format-patch, so it
+# must not be tracked in that same history -- doing so produced patches whose
+# content was other patch files, and commits that carried nothing else.
+# Regenerate with the command in README.md.
+patches/
