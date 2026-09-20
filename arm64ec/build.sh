@@ -88,10 +88,45 @@ while read -r p; do [ -n "$p" ] && INC="$INC -I$ROOT/$p"; done < "$ROOT/arm64ec/
 DEFS="-DWIN32 -DNDEBUG -D_WINDOWS -D_USRDLL -DIMGUI_DISABLE_SSE -DUNICODE -D_UNICODE -Wno-c++11-narrowing"
 FLAGS="-std=c++23 -O2 $INC -include $ROOT/compat/arm64ec/opti_sal_compat.h $DEFS"
 
+# ------------------------------------------------------------------ FSR2 2.2.1
+# OptiScaler normally links prebuilt FidelityFX static libs, which ship as x86-64
+# COFF and cannot go into an ARM64EC image; compat/arm64ec/ffx_stubs stands in so
+# the DLL still links. build_fsr2.sh cross-builds the real thing from source, and
+# where it has produced a library the matching stubs are dropped.
+#
+# It needs the FSR2 source tree and the generated shader permutation headers
+# (arm64ec/../arm64ec-deps/fsr2gen), so it stays optional: without them the build
+# falls back to the stubs exactly as before.
+FSR2_LIB="$DEPS/fsr2gen/obj/libffx_fsr2_arm64ec.a"
+FSR2_STUBS_REPLACED=""
+if [ -d "$DEPS/FidelityFX-FSR2" ] && [ -d "$DEPS/fsr2gen/dx12" ]; then
+  echo ">> building FidelityFX-FSR2 2.2.1 for arm64ec"
+  "$ROOT/arm64ec/build_fsr2.sh" "$DEPS" >/dev/null || { echo "   FSR2 build failed, falling back to stubs"; FSR2_LIB=""; }
+fi
+if [ -f "$FSR2_LIB" ]; then
+  # Only the core and DX12 backend are built; the DX11 and Vulkan FSR2 stubs stay.
+  FSR2_STUBS_REPLACED="-not -name fsr2_ffx_fsr2_stub.cpp -not -name fsr2_dx12_ffx_fsr2_dx12_stub.cpp"
+else
+  FSR2_LIB=""
+fi
+
 echo ">> compiling OptiScaler"
 cd "$ROOT"
 find OptiScaler -name '*.cpp' -not -path '*/library/*' -not -name 'imgui_impl_uwp.cpp' > "$OUT/srcs.txt"
-find compat/arm64ec -name '*.cpp' >> "$OUT/srcs.txt"
+find compat/arm64ec -name '*.cpp' $FSR2_STUBS_REPLACED >> "$OUT/srcs.txt"
+
+# Drop objects whose source is no longer in the list. The link globs obj/*.o, so
+# a stale object silently stays in the image -- which is not a theoretical worry:
+# the FSR2 stubs above kept resolving after their sources were dropped, so the
+# real library was never pulled out of the archive and the DLL came out byte-for-byte
+# identical to the stub build.
+awk '{gsub(/\//,"_"); sub(/\.cpp$/,".o"); print}' "$OUT/srcs.txt" | sort -u > "$OUT/expected_objs.txt"
+if [ -d "$OUT/obj" ]; then
+  find "$OUT/obj" -name '*.o' -printf '%f\n' | sort -u > "$OUT/actual_objs.txt"
+  comm -13 "$OUT/expected_objs.txt" "$OUT/actual_objs.txt" | while read -r stale; do
+    [ -n "$stale" ] && { echo "   pruning stale object: $stale"; rm -f "$OUT/obj/$stale"; }
+  done
+fi
 xargs -P "$(nproc)" -I{} sh -c \
   "\"$CXX\" $FLAGS -c '{}' -o \"$OUT/obj/\$(echo '{}' | tr / _ | sed 's/\.cpp\$/.o/')\"" < "$OUT/srcs.txt"
 
@@ -120,6 +155,7 @@ python3 "$ROOT/arm64ec/gen_def.py" OptiScaler/Source.def "$OUT/all_syms.txt" "$O
 
 echo ">> linking"
 "$CXX" -shared -o "$OUT/OptiScaler.dll" "$OUT"/obj/*.o "$OUT/obj/zz_resource.res" "$OUT/Source_arm64ec.def" \
+  ${FSR2_LIB:+"$FSR2_LIB"} \
   -L"$OUT" -L"$OUT/freetype" -ldetours -lfreetype -lvulkan-1 -ld3d12_extra \
   -ld3d11 -ld3d12 -ldxgi -ldxguid -ld3dcompiler -lwinhttp -ldbghelp -ldwmapi \
   -lgdi32 -limm32 -lshell32 -luser32 -lversion -lole32 -loleaut32 -luuid \
