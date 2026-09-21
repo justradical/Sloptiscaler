@@ -555,6 +555,14 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_CreateFeature(ID3D11DeviceContext
         if (IdentifyGpu::getPrimaryGpu().dlssCapable && NVNGXProxy::IsDx11Inited())
             upscalerChoice = Upscaler::DLSS;
 
+        // Adreno: prefer SGSR2. There is no native DX11 SGSR2 backend, so this is
+        // the Dx11-on-Dx12 bridge; see the matching note in NVNGX_DLSS_Dx12.cpp.
+        if (IsAdrenoGpu(IdentifyGpu::getPrimaryGpu()))
+        {
+            LOG_INFO("Adreno GPU, defaulting to SGSR2 over the Dx11/Dx12 bridge");
+            upscalerChoice = Upscaler::SGSR2_on12;
+        }
+
         if (Config::Instance()->Dx11Upscaler.has_value())
             upscalerChoice = Config::Instance()->Dx11Upscaler.value();
 

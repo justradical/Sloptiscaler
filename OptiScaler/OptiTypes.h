@@ -227,6 +227,7 @@ enum Value : uint32_t
     Nvidia = 0x10DE,
     AMD = 0x1002,
     Intel = 0x8086,
+    Qualcomm = 0x5143, // Adreno, reported by Turnip/Mesa through vkd3d-proton and DXVK
 };
 };
 

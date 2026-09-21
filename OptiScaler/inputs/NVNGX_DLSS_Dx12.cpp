@@ -603,6 +603,20 @@ static Upscaler GetUpscalerBackend()
     if (primaryGpu.fsr4Support != FSR4Support::None)
         upscaler = Upscaler::FFX;
 
+    // Adreno: prefer SGSR2, Qualcomm's own upscaler for these parts. XeSS and the
+    // FSR backends either need a vendor runtime that has no build for this
+    // platform, or run far slower here than a shader-only upscaler tuned for it.
+    if (IsAdrenoGpu(primaryGpu))
+    {
+        // Report the vendor id alongside the name: the two detection paths are
+        // redundant by design, and this is what says which one carried a given
+        // device. 0x5143 means the Vulkan vendorID reached the DXGI adapter
+        // desc; anything else means only the description matched.
+        LOG_INFO("Adreno GPU ({}, vendorId {:#06x}), defaulting to SGSR2", primaryGpu.name,
+                 (uint32_t) primaryGpu.vendorId);
+        upscaler = Upscaler::SGSR2;
+    }
+
     if (Config::Instance()->Dx12Upscaler.has_value())
         upscaler = Config::Instance()->Dx12Upscaler.value();
 

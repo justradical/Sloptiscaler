@@ -1,4 +1,8 @@
 #pragma once
+#include <algorithm>
+#include <cctype>
+#include <string_view>
+
 #include <nvapi.h>
 #include <proxies/D3D12_Proxy.h>
 #include <device_info/device_info.hpp>
@@ -71,6 +75,30 @@ struct GpuInformation
     NV_GPU_ARCH_INFO nvidiaArchInfo {};
     bool noDisplayConnected = false;
 };
+
+// Adreno, i.e. the msm/Turnip stack. SGSR2 is Qualcomm's own upscaler for these
+// parts, and on ARM64EC it is also the only backend with no vendor runtime to
+// link, so it is the sensible default here.
+//
+// Both fields are checked because how the part identifies itself depends on the
+// translation layer in front of it: vkd3d-proton and DXVK pass the Vulkan
+// vendorID (0x5143) through to the DXGI adapter desc, but a layer that reports
+// something else still carries "Adreno" or "Turnip" in the description.
+inline bool IsAdrenoGpu(const GpuInformation& gpu)
+{
+    if (gpu.vendorId == VendorId::Qualcomm)
+        return true;
+
+    // Case-insensitive substring; the description is not a stable format.
+    auto contains = [&](std::string_view needle)
+    {
+        return std::search(gpu.name.begin(), gpu.name.end(), needle.begin(), needle.end(),
+                           [](unsigned char a, unsigned char b)
+                           { return std::tolower(a) == std::tolower(b); }) != gpu.name.end();
+    };
+
+    return contains("adreno") || contains("turnip");
+}
 
 inline constexpr bool IsEqualLUID(LUID luid1, LUID luid2)
 {
