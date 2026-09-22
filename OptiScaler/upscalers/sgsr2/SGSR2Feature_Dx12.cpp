@@ -901,7 +901,14 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
             InParameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, (void**) &paramReactive);
     }
 
-    if (paramColor == nullptr || paramDepth == nullptr || paramVelocity == nullptr || paramOutput == nullptr)
+    // Depth is optional. It only feeds the disocclusion test, and some games
+    // never hand an upscaler one -- UE titles driving DLSS through Streamline
+    // without OptiPatcher supply colour, motion vectors and output but no
+    // depth. Failing the whole evaluation over it meant those games showed
+    // "Upscaler failed to run!" every frame; without it the result is merely
+    // worse on disocclusion. XeSS takes the same view, only requiring depth
+    // when motion vectors are low-resolution.
+    if (paramColor == nullptr || paramVelocity == nullptr || paramOutput == nullptr)
     {
         LOG_ERROR("Missing inputs: color {0}, depth {1}, mv {2}, output {3}", paramColor != nullptr,
                   paramDepth != nullptr, paramVelocity != nullptr, paramOutput != nullptr);
@@ -910,14 +917,25 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     }
 
     _hasColor = true;
-    _hasDepth = true;
+    _hasDepth = (paramDepth != nullptr);
     _hasMV = true;
 
     {
         auto vd = paramVelocity->GetDesc();
-        auto ddesc = paramDepth->GetDesc();
-        _constants.depthSize[0] = (uint32_t) ddesc.Width;
-        _constants.depthSize[1] = (uint32_t) ddesc.Height;
+
+        // Depth may legitimately be absent; fall back to the render size so the
+        // value is well-formed even though the shader will not gather from it.
+        if (paramDepth != nullptr)
+        {
+            auto ddesc = paramDepth->GetDesc();
+            _constants.depthSize[0] = (uint32_t) ddesc.Width;
+            _constants.depthSize[1] = (uint32_t) ddesc.Height;
+        }
+        else
+        {
+            _constants.depthSize[0] = RenderWidth();
+            _constants.depthSize[1] = RenderHeight();
+        }
 
         // OPTI_SGSR2_NODEPTHFIX=1 feeds the render size instead, reproducing
         // the old mismatched gather exactly, so the depth alignment fix can be
@@ -968,6 +986,14 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     //
     // A null SRV is a valid descriptor and reads as zero, so an absent mask
     // needs no special case beyond leaving reactiveStrength at zero.
+    _constants.hasDepth = (paramDepth != nullptr) ? 1u : 0u;
+    if (paramDepth == nullptr && !_loggedNoDepth)
+    {
+        _loggedNoDepth = true;
+        LOG_WARN("No depth buffer supplied; running without disocclusion detection. "
+                 "Expect ghosting where geometry is revealed from behind an edge.");
+    }
+
     DXGI_FORMAT reactiveFormat = DXGI_FORMAT_R8_UNORM;
     if (paramReactive != nullptr)
     {
@@ -1006,8 +1032,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
     ResourceBarrier(InCommandList, paramColor, (D3D12_RESOURCE_STATES) colorState,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    ResourceBarrier(InCommandList, paramDepth, (D3D12_RESOURCE_STATES) depthState,
-                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    if (paramDepth != nullptr)
+        ResourceBarrier(InCommandList, paramDepth, (D3D12_RESOURCE_STATES) depthState,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     ResourceBarrier(InCommandList, paramVelocity, (D3D12_RESOURCE_STATES) mvState,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
@@ -1036,7 +1063,8 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
     {
         ID3D12Resource* srvs[SRV_Count] = { paramColor, paramDepth, paramVelocity, paramReactive };
         DXGI_FORMAT srvFormats[SRV_Count] = { ResolveFormat(paramColor->GetDesc().Format),
-                                              ResolveFormat(paramDepth->GetDesc().Format),
+                                              paramDepth != nullptr ? ResolveFormat(paramDepth->GetDesc().Format)
+                                                                    : DXGI_FORMAT_R32_FLOAT,
                                               ResolveFormat(paramVelocity->GetDesc().Format),
                                               reactiveFormat };
 
@@ -1195,8 +1223,9 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
     ResourceBarrier(InCommandList, paramColor, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                     (D3D12_RESOURCE_STATES) colorState);
-    ResourceBarrier(InCommandList, paramDepth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    (D3D12_RESOURCE_STATES) depthState);
+    if (paramDepth != nullptr)
+        ResourceBarrier(InCommandList, paramDepth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        (D3D12_RESOURCE_STATES) depthState);
     ResourceBarrier(InCommandList, paramVelocity, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                     (D3D12_RESOURCE_STATES) mvState);
 

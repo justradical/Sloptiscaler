@@ -48,7 +48,9 @@ struct alignas(16) SGSR2Constants
     // Scales the reactive mask's contribution to Wfactor. Zero when the game
     // supplies no mask, which is the common case. See the note in Upscale.
     float reactiveStrength;
-    uint32_t _pad2;
+    // Zero when the game supplies no depth buffer. Depth only feeds the
+    // disocclusion test, so the pass degrades rather than failing.
+    uint32_t hasDepth;
 };
 
 static_assert(sizeof(SGSR2Constants) == 160, "SGSR2Constants must match the HLSL cbuffer layout");

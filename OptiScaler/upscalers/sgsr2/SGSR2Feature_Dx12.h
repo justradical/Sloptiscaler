@@ -75,6 +75,9 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
     // Whether the "reactive mask present / absent" line has been emitted; it is
     // the same every frame and only useful once.
     bool _loggedReactive = false;
+    // Whether the "no depth buffer" warning has been emitted; it is the same
+    // every frame and only useful once.
+    bool _loggedNoDepth = false;
 
     // GPU timing, opt-in via OPTI_SGSR2_TIMING=1.
     static constexpr uint32_t TimestampsPerFrame = 4;

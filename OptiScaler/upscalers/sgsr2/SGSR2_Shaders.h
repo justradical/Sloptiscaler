@@ -53,6 +53,9 @@
 // Shared constant buffer. Laid out in explicit float4-sized groups so the HLSL
 // packing rules and the C++ struct agree without padding surprises.
 #define SGSR2_COMMON_HLSL                                                                                              \
+    "#ifdef VK_MODE\n"                                                                                                \
+    "[[vk::binding(0, 0)]]\n"                                                                                         \
+    "#endif\n"                                                                                                        \
     "cbuffer SGSR2Params : register(b0)\n"                                                                             \
     "{\n"                                                                                                              \
     "    uint2  renderSize;\n"                                                                                         \
@@ -72,9 +75,15 @@
     "    uint   debugMode;\n"                                                                                           \
     "    uint2  depthSize;\n"                                                                                           \
     "    float  reactiveStrength;\n"                                                                                    \
-    "    uint   _sgsrPad2;\n"                                                                                          \
+    "    uint   hasDepth;\n"                                                                                          \
     "};\n"                                                                                                             \
+    "#ifdef VK_MODE\n"                                                                                                \
+    "[[vk::binding(1, 0)]]\n"                                                                                         \
+    "#endif\n"                                                                                                        \
     "SamplerState PointClamp  : register(s0);\n"                                                                       \
+    "#ifdef VK_MODE\n"                                                                                                \
+    "[[vk::binding(2, 0)]]\n"                                                                                         \
+    "#endif\n"                                                                                                        \
     "SamplerState LinearClamp : register(s1);\n"
 
 // ----------------------------------------------------------------------------
@@ -87,17 +96,38 @@
 // Outputs: MotionDepthClipAlphaBuffer (RGBA16F), YCoCgColor (R32_UINT)
 // ----------------------------------------------------------------------------
 inline const char* SGSR2_ConvertShader = SGSR2_COMMON_HLSL R"(
+#ifdef VK_MODE
+[[vk::binding(3, 0)]]
+#endif
 Texture2D<float4> InputColor    : register(t0);
+#ifdef VK_MODE
+[[vk::binding(4, 0)]]
+#endif
 Texture2D<float>  InputDepth    : register(t1);
+#ifdef VK_MODE
+[[vk::binding(5, 0)]]
+#endif
 Texture2D<float4> InputVelocity : register(t2);
 // Declared but unused here; Upscale is what consumes it. Both passes share a
 // root signature, so the slot has to exist in both.
+#ifdef VK_MODE
+[[vk::binding(6, 0)]]
+#endif
 Texture2D<float4> ReactiveUnused : register(t3);
 
+#ifdef VK_MODE
+[[vk::binding(7, 0)]] [[vk::image_format("rgba16f")]]
+#endif
 RWTexture2D<float4> MotionDepthClipAlphaBuffer : register(u0);
+#ifdef VK_MODE
+[[vk::binding(8, 0)]] [[vk::image_format("r32ui")]]
+#endif
 RWTexture2D<uint>   YCoCgColor                 : register(u1);
 // One counter of how many sampled pixels are moving, used to spot a static
 // camera. See UpdateSameCamera on the host side.
+#ifdef VK_MODE
+[[vk::binding(9, 0)]] [[vk::image_format("r32ui")]]
+#endif
 RWBuffer<uint>      MotionCounter              : register(u2);
 
 // Nearest of two depths, honouring reverse-Z.
@@ -128,22 +158,37 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     // drift up to three texels right by the screen edge. Depth then no longer
     // lines up with colour, and depthclip, which is what rejects stale history,
     // is computed from the wrong surface.
-    float2 depthRcp    = float2(1.0f / float(depthSize.x), 1.0f / float(depthSize.y));
-    float2 depthCoord  = float2(tid.xy) * depthRcp;
-    float4 topleft     = InputDepth.GatherRed(PointClamp, depthCoord);
-    float2 v10         = float2(depthRcp.x * 2.0f, 0.0f);
-    float4 topRight    = InputDepth.GatherRed(PointClamp, depthCoord + v10);
-    float2 v12         = float2(0.0f, depthRcp.y * 2.0f);
-    float4 bottomLeft  = InputDepth.GatherRed(PointClamp, depthCoord + v12);
-    float2 v14         = float2(depthRcp.x * 2.0f, depthRcp.y * 2.0f);
-    float4 bottomRight = InputDepth.GatherRed(PointClamp, depthCoord + v14);
+    float4 topleft = 0.0f, topRight = 0.0f, bottomLeft = 0.0f, bottomRight = 0.0f;
+
+    // Guarded, not just unused: with no depth the SRV is a null descriptor, and
+    // gathering from one is not something every driver tolerates. Skipping the
+    // fetch is what keeps this safe, rather than discarding the result later.
+    if (hasDepth != 0u)
+    {
+        float2 depthRcp   = float2(1.0f / float(depthSize.x), 1.0f / float(depthSize.y));
+        float2 depthCoord = float2(tid.xy) * depthRcp;
+        topleft     = InputDepth.GatherRed(PointClamp, depthCoord);
+        float2 v10  = float2(depthRcp.x * 2.0f, 0.0f);
+        topRight    = InputDepth.GatherRed(PointClamp, depthCoord + v10);
+        float2 v12  = float2(0.0f, depthRcp.y * 2.0f);
+        bottomLeft  = InputDepth.GatherRed(PointClamp, depthCoord + v12);
+        float2 v14  = float2(depthRcp.x * 2.0f, depthRcp.y * 2.0f);
+        bottomRight = InputDepth.GatherRed(PointClamp, depthCoord + v14);
+    }
 
     float maxC        = Nearer(Nearer(Nearer(topleft.y, topRight.x), bottomLeft.z), bottomRight.w);
     float topleft4    = Nearer(Nearer(Nearer(topleft.y, topleft.x), topleft.z), topleft.w);
     float topLeftMax9 = Nearer(bottomLeft.w, Nearer(Nearer(maxC, topleft4), topRight.w));
 
     float depthclip = 0.0f;
-    bool anyGeometry = (depthInverted != 0u) ? (maxC > 1.0e-05f) : (maxC < 1.0f - 1.0e-05f);
+    // No depth buffer: leave depthclip at 0. That is the same value the
+    // reference yields for pixels at the far plane -- history is trusted and
+    // the neighbourhood colour box is what guards against ghosting. Worse on
+    // disocclusion than real depth, but it runs, and some games never hand an
+    // upscaler a depth texture at all: Dead as Disco drives DLSS through
+    // Streamline and supplies none, with or without OptiPatcher loaded.
+    bool anyGeometry = (hasDepth != 0u) &&
+                       ((depthInverted != 0u) ? (maxC > 1.0e-05f) : (maxC < 1.0f - 1.0e-05f));
     if (anyGeometry)
     {
         float topRight4    = Nearer(Nearer(Nearer(topRight.y, topRight.x), topRight.z), topRight.w);
@@ -259,13 +304,34 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
 // Outputs: SceneColorOutput (display res), HistoryOutput (display res)
 // ----------------------------------------------------------------------------
 inline const char* SGSR2_UpscaleShader = SGSR2_COMMON_HLSL R"(
+#ifdef VK_MODE
+[[vk::binding(3, 0)]]
+#endif
 Texture2D<float4> PrevHistoryOutput          : register(t0);
+#ifdef VK_MODE
+[[vk::binding(4, 0)]]
+#endif
 Texture2D<float4> MotionDepthClipAlphaBuffer : register(t1);
+#ifdef VK_MODE
+[[vk::binding(5, 0)]]
+#endif
 Texture2D<uint>   YCoCgColor                 : register(t2);
+#ifdef VK_MODE
+[[vk::binding(6, 0)]]
+#endif
 Texture2D<float4> ReactiveMask               : register(t3);
 
+#ifdef VK_MODE
+[[vk::binding(7, 0)]] [[vk::image_format("rgba16f")]]
+#endif
 RWTexture2D<float4> SceneColorOutput : register(u0);
+#ifdef VK_MODE
+[[vk::binding(8, 0)]] [[vk::image_format("rgba16f")]]
+#endif
 RWTexture2D<float4> HistoryOutput    : register(u1);
+#ifdef VK_MODE
+[[vk::binding(9, 0)]] [[vk::image_format("r32ui")]]
+#endif
 RWBuffer<uint>      MotionCounterUnused : register(u2); // shared root signature
 
 float FastLanczos(float base)
