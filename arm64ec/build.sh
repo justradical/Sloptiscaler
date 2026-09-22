@@ -137,13 +137,19 @@ iconv -f UTF-16LE -t UTF-8 OptiScaler/OptiScaler.rc -o "$OUT/OptiScaler_utf8.rc"
 
 # mingw ships no vulkan-1 import library; synthesise one from the vk_* symbols
 # the objects actually reference.
-if [ ! -f "$OUT/libvulkan-1.a" ]; then
-  echo ">> generating vulkan-1 import library"
-  { echo "LIBRARY vulkan-1.dll"; echo "EXPORTS"
-    "$TC/llvm-nm" --undefined-only "$OUT"/obj/*.o | awk '{print $NF}' \
-      | sed 's/^#//' | grep -E '^vk[A-Za-z0-9]+$' | sort -u
-  } > "$OUT/vulkan-1.def"
+# Regenerated every build, not cached: the symbol list is derived from the
+# objects, so adding a call to a Vulkan function the previous build did not use
+# would otherwise fail to link against a stale library.
+{ echo "LIBRARY vulkan-1.dll"; echo "EXPORTS"
+  "$TC/llvm-nm" --undefined-only "$OUT"/obj/*.o | awk '{print $NF}' \
+    | sed 's/^#//' | grep -E '^vk[A-Za-z0-9]+$' | sort -u
+} > "$OUT/vulkan-1.def.new"
+if [ ! -f "$OUT/libvulkan-1.a" ] || ! cmp -s "$OUT/vulkan-1.def.new" "$OUT/vulkan-1.def"; then
+  echo ">> generating vulkan-1 import library ($(grep -c '^vk' "$OUT/vulkan-1.def.new") symbols)"
+  mv "$OUT/vulkan-1.def.new" "$OUT/vulkan-1.def"
   "$TC/arm64ec-w64-mingw32-dlltool" -d "$OUT/vulkan-1.def" -l "$OUT/libvulkan-1.a" -m arm64ec
+else
+  rm -f "$OUT/vulkan-1.def.new"
 fi
 
 # ---------------------------------------------------------------------- link

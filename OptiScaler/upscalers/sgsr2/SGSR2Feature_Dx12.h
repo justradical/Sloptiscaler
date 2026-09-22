@@ -71,7 +71,6 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
     ID3D12Resource* _history[2] = { nullptr, nullptr };
     ID3D12Resource* _outputBuffer = nullptr;
     uint32_t _historyIndex = 0;
-    bool _historyValid = false;
     // Whether the "reactive mask present / absent" line has been emitted; it is
     // the same every frame and only useful once.
     bool _loggedReactive = false;

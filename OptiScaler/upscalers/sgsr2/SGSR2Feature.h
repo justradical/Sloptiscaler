@@ -64,6 +64,14 @@ class SGSR2Feature : public virtual IFeature
     // OptiScaler intercepts, so "same camera" is inferred from motion instead.
     bool _sameCamera = false;
 
+    // Whether a usable previous frame exists. Drives the reset flag, which the
+    // shared constants set, so it lives here rather than in either backend.
+    bool _historyValid = false;
+
+    // Fills _constants from the NGX parameters. API-independent; each backend
+    // uploads the result itself.
+    bool UpdateSharedConstants(NVSDK_NGX_Parameter* InParameters);
+
   public:
     feature_version Version() override { return feature_version { 2, 0, 0, 0 }; }
     Upscaler GetUpscalerType() const override { return Upscaler::SGSR2; }

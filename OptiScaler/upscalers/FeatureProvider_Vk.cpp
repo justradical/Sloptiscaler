@@ -13,6 +13,7 @@
 #include "upscalers/fsr2_212/FSR2Feature_VkOnDx12_212.h"
 #include "upscalers/ffx/FFXFeature_Vk.h"
 #include "upscalers/xess/XeSSFeature_Vk.h"
+#include "upscalers/sgsr2/SGSR2Feature_Vk.h"
 #include "upscalers/ffx/FFXFeature_VkOn12.h"
 #include <misc/IdentifyGpu.h>
 
@@ -39,6 +40,10 @@ bool FeatureProvider_Vk::GetFeature(Upscaler upscaler, UINT handleId, NVSDK_NGX_
 
     case Upscaler::FSR22:
         *feature = std::make_unique<FSR2FeatureVk>(handleId, parameters);
+        break;
+
+    case Upscaler::SGSR2:
+        *feature = std::make_unique<SGSR2FeatureVk>(handleId, parameters);
         break;
 
     case Upscaler::FFX:
