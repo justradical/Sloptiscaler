@@ -15,7 +15,7 @@ def convert_shader_to_header(input_file_path, output_file_path, array_name):
     try:
         with open(output_file_path, 'w') as output_file:
             output_file.write("#pragma once\n\n")
-            output_file.write(f"inline static const unsigned char {array_name}[] = {{\n    ")
+            output_file.write(f"alignas(4) inline static const unsigned char {array_name}[] = {{\n    ")
 
             for i, byte in enumerate(byte_array):
                 output_file.write(f"0x{byte:02x}")

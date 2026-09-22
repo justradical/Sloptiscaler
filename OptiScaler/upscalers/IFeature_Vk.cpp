@@ -45,9 +45,12 @@ bool IFeature_Vk::Evaluate(VkCommandBuffer InCmdBuffer, NVSDK_NGX_Parameter* InP
     if (_sharpness > 1.0f)
         _sharpness = 1.0f;
 
+    // Same list as the D3D12 path: upscalers with no sharpening of their own,
+    // which SGSR2 is on every API.
     auto upscaler = GetUpscalerType();
     bool useRcas = upscaler == Upscaler::XeSS ||
-                   (upscaler == Upscaler::DLSS && Version() >= feature_version(2, 5, 1)) || upscaler == Upscaler::DLSSD;
+                   (upscaler == Upscaler::DLSS && Version() >= feature_version(2, 5, 1)) ||
+                   upscaler == Upscaler::DLSSD || upscaler == Upscaler::SGSR2;
 
     if (!useRcas)
         useRcas = Config::Instance()->RcasEnabled.value_or_default();

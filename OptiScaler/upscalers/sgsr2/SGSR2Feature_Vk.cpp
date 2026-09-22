@@ -101,9 +101,13 @@ void SGSR2FeatureVk::DestroyImage(Image& img)
 void SGSR2FeatureVk::Barrier(VkCommandBuffer cmd, Image& img, VkImageLayout newLayout, VkAccessFlags srcAccess,
                              VkAccessFlags dstAccess)
 {
-    if (img.layout == newLayout)
-        return;
-
+    // Deliberately no same-layout early-out. Our images sit permanently in
+    // GENERAL, so skipping those barriers would emit nothing at all from the
+    // second frame onwards -- and the hazards here are across frames, not
+    // within one: pass 2 writes nextHistory, and the next frame's pass 2 samples
+    // that same image as prevHistory. A GENERAL->GENERAL barrier is legal and is
+    // exactly the tool for that. The D3D12 backend gets this for free because it
+    // restores resource states at end of frame.
     VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     b.oldLayout = img.layout;
     b.newLayout = newLayout;
@@ -207,7 +211,10 @@ bool SGSR2FeatureVk::CreatePipelines()
 bool SGSR2FeatureVk::CreateResources()
 {
     const uint32_t rw = RenderWidth(), rh = RenderHeight();
-    const uint32_t dw = DisplayWidth(), dh = DisplayHeight();
+    // TargetWidth, not DisplayWidth: UpdateSharedConstants writes displaySize
+    // from TargetWidth, and the upscale pass bounds-checks against it. They are
+    // equal until output scaling moves the target, and must not disagree then.
+    const uint32_t dw = TargetWidth(), dh = TargetHeight();
 
     const VkImageUsageFlags rwUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
@@ -356,6 +363,21 @@ bool SGSR2FeatureVk::InitInternal(VkCommandBuffer InCmdBuffer, NVSDK_NGX_Paramet
         return false;
     }
 
+    // The Convert pass only ever adds to this buffer, so freshly allocated
+    // device memory would be read back as whatever was there before. Nothing
+    // reads it on this backend yet -- bSameCamera is still D3D12-only -- but
+    // an uninitialised counter is not a state worth leaving lying around.
+    vkCmdFillBuffer(InCmdBuffer, _motionCounter, 0, VK_WHOLE_SIZE, 0);
+
+    VkBufferMemoryBarrier mcb { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+    mcb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    mcb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    mcb.srcQueueFamilyIndex = mcb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mcb.buffer = _motionCounter;
+    mcb.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(InCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+                         nullptr, 1, &mcb, 0, nullptr);
+
     _historyValid = false;
     SetInit(true);
     return true;
@@ -435,36 +457,54 @@ bool SGSR2FeatureVk::DispatchPasses(VkCommandBuffer cmd, NVSDK_NGX_Resource_VK* 
                                     NVSDK_NGX_Resource_VK* output, NVSDK_NGX_Resource_VK* reactive)
 {
     const uint32_t rw = RenderWidth(), rh = RenderHeight();
-    const uint32_t dw = DisplayWidth(), dh = DisplayHeight();
+    // TargetWidth, not DisplayWidth: UpdateSharedConstants writes displaySize
+    // from TargetWidth, and the upscale pass bounds-checks against it. They are
+    // equal until output scaling moves the target, and must not disagree then.
+    const uint32_t dw = TargetWidth(), dh = TargetHeight();
 
     Image& prevHistory = _history[_historyIndex];
     Image& nextHistory = _history[_historyIndex ^ 1];
 
     // Game-supplied images are already in a shader-readable layout by contract;
     // ours are not, so only ours are transitioned.
-    Barrier(cmd, _motionDepthClipAlpha, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_SHADER_WRITE_BIT);
-    Barrier(cmd, _ycocg, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_SHADER_WRITE_BIT);
-    Barrier(cmd, prevHistory, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_SHADER_READ_BIT);
-    Barrier(cmd, nextHistory, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_SHADER_WRITE_BIT);
-    Barrier(cmd, _output, VK_IMAGE_LAYOUT_GENERAL, 0, VK_ACCESS_SHADER_WRITE_BIT);
+    // Source access masks describe what the PREVIOUS frame did to each image.
+    Barrier(cmd, _motionDepthClipAlpha, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT);
+    Barrier(cmd, _ycocg, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+    Barrier(cmd, prevHistory, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    Barrier(cmd, nextHistory, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+    Barrier(cmd, _output, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 
     const VkDeviceSize cbOffset = _ringIndex * _constantStride;
-    auto sampled = [](VkImageView v)
+
+    // The layout declared in a descriptor has to be the layout the image is
+    // actually in. Ours are kept in GENERAL, because they are written as
+    // storage images by one pass and sampled by the next; the game's arrive
+    // shader-readable, which is what the NGX contract promises. Two helpers
+    // rather than one, so the distinction cannot be lost at a call site.
+    auto gameSampled = [](VkImageView v)
     { return VkDescriptorImageInfo { VK_NULL_HANDLE, v, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }; };
+    auto ownSampled = [](VkImageView v)
+    { return VkDescriptorImageInfo { VK_NULL_HANDLE, v, VK_IMAGE_LAYOUT_GENERAL }; };
     auto storage = [](VkImageView v)
     { return VkDescriptorImageInfo { VK_NULL_HANDLE, v, VK_IMAGE_LAYOUT_GENERAL }; };
 
     // A slot the shader does not read still needs a live view behind it, so
-    // unused SRVs point at one of our own images rather than nothing.
-    VkImageView filler = _ycocg.view;
+    // unused SRVs point at one of our own images rather than nothing -- and
+    // therefore use the GENERAL spelling.
+    // Must be a float-format view: the slots it fills are Texture2D<float>
+    // (depth) and Texture2D<float4> (reactive), and a view's numeric format has
+    // to match the shader's sampled type even when the read is branched around.
+    // _ycocg is R32_UINT and would be wrong on both.
+    VkImageView filler = _motionDepthClipAlpha.view;
 
     // ------------------------------------------------------------- Pass 1
     {
         VkDescriptorImageInfo srvs[4] = {
-            sampled(color->Resource.ImageViewInfo.ImageView),
-            sampled(depth != nullptr ? depth->Resource.ImageViewInfo.ImageView : filler),
-            sampled(velocity->Resource.ImageViewInfo.ImageView),
-            sampled(reactive != nullptr ? reactive->Resource.ImageViewInfo.ImageView : filler),
+            gameSampled(color->Resource.ImageViewInfo.ImageView),
+            depth != nullptr ? gameSampled(depth->Resource.ImageViewInfo.ImageView) : ownSampled(filler),
+            gameSampled(velocity->Resource.ImageViewInfo.ImageView),
+            reactive != nullptr ? gameSampled(reactive->Resource.ImageViewInfo.ImageView) : ownSampled(filler),
         };
         VkDescriptorImageInfo uavs[2] = { storage(_motionDepthClipAlpha.view), storage(_ycocg.view) };
 
@@ -486,10 +526,10 @@ bool SGSR2FeatureVk::DispatchPasses(VkCommandBuffer cmd, NVSDK_NGX_Resource_VK* 
     // ------------------------------------------------------------- Pass 2
     {
         VkDescriptorImageInfo srvs[4] = {
-            sampled(prevHistory.view),
-            sampled(_motionDepthClipAlpha.view),
-            sampled(_ycocg.view),
-            sampled(reactive != nullptr ? reactive->Resource.ImageViewInfo.ImageView : filler),
+            ownSampled(prevHistory.view),
+            ownSampled(_motionDepthClipAlpha.view),
+            ownSampled(_ycocg.view),
+            reactive != nullptr ? gameSampled(reactive->Resource.ImageViewInfo.ImageView) : ownSampled(filler),
         };
         VkDescriptorImageInfo uavs[2] = { storage(_output.view), storage(nextHistory.view) };
 
@@ -509,19 +549,37 @@ bool SGSR2FeatureVk::DispatchPasses(VkCommandBuffer cmd, NVSDK_NGX_Resource_VK* 
             VK_ACCESS_TRANSFER_READ_BIT);
 
     VkImageMemoryBarrier ob { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-    ob.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    // UNDEFINED rather than a guess at the game's current layout: the blit
+    // covers the whole image, so nothing is lost by discarding, and assuming
+    // the wrong source layout would be undefined behaviour.
+    ob.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ob.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     ob.srcQueueFamilyIndex = ob.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     ob.image = output->Resource.ImageViewInfo.Image;
-    ob.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    // The game's view may target a non-zero mip or layer; transitioning and
+    // blitting mip 0 regardless would write somewhere it never looks.
+    ob.subresourceRange = output->Resource.ImageViewInfo.SubresourceRange;
     ob.srcAccessMask = 0;
     ob.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &ob);
 
+    // vkCmdBlitImage needs TRANSFER_DST on the destination. When a post-pass is
+    // active this is our own intermediate, which IFeature_Vk creates with it.
+    // With every post-pass off the destination is the game's own image, and NGX
+    // only promises STORAGE. Nothing in the parameter surface reports usage, so
+    // this is flagged rather than silently relied on; the real fix is a copy
+    // compute shader, which is not worth writing blind.
+    if (!_loggedBlitAssumption)
+    {
+        _loggedBlitAssumption = true;
+        LOG_DEBUG("Blitting into the output image; assumes TRANSFER_DST usage when no post-pass is active");
+    }
+
     VkImageBlit blit {};
     blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, output->Resource.ImageViewInfo.SubresourceRange.baseMipLevel,
+                            output->Resource.ImageViewInfo.SubresourceRange.baseArrayLayer, 1 };
     blit.srcOffsets[1] = { (int32_t) dw, (int32_t) dh, 1 };
     blit.dstOffsets[1] = { (int32_t) output->Resource.ImageViewInfo.Width,
                            (int32_t) output->Resource.ImageViewInfo.Height, 1 };
@@ -529,9 +587,16 @@ bool SGSR2FeatureVk::DispatchPasses(VkCommandBuffer cmd, NVSDK_NGX_Resource_VK* 
                    output->Resource.ImageViewInfo.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                    VK_FILTER_LINEAR);
 
-    std::swap(ob.oldLayout, ob.newLayout);
+    // GENERAL, not SHADER_READ_ONLY_OPTIMAL. Whatever consumes this next -- RCAS,
+    // output scaling, the magnifier, or the game itself -- expects GENERAL:
+    // IFeature_Vk's post-passes each declare oldLayout=GENERAL for their input,
+    // and NGX's ReadWrite contract is storage-image access. Handing them an
+    // image in a different layout is a mismatched barrier, which on a tiler is
+    // licensed to discard the contents.
+    ob.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    ob.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     ob.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    ob.dstAccessMask = 0;
+    ob.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &ob);
 

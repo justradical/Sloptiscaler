@@ -99,4 +99,5 @@ class SGSR2FeatureVk : public SGSR2Feature, public IFeature_Vk
     uint32_t _historyIndex = 0;
     bool _loggedNoDepth = false;
     bool _loggedReactive = false;
+    bool _loggedBlitAssumption = false;
 };
