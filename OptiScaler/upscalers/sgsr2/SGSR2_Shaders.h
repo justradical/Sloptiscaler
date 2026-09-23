@@ -158,37 +158,47 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     // drift up to three texels right by the screen edge. Depth then no longer
     // lines up with colour, and depthclip, which is what rejects stale history,
     // is computed from the wrong surface.
-    float4 topleft = 0.0f, topRight = 0.0f, bottomLeft = 0.0f, bottomRight = 0.0f;
-
-    // Guarded, not just unused: with no depth the SRV is a null descriptor, and
-    // gathering from one is not something every driver tolerates. Skipping the
-    // fetch is what keeps this safe, rather than discarding the result later.
-    if (hasDepth != 0u)
-    {
-        float2 depthRcp   = float2(1.0f / float(depthSize.x), 1.0f / float(depthSize.y));
-        float2 depthCoord = float2(tid.xy) * depthRcp;
-        topleft     = InputDepth.GatherRed(PointClamp, depthCoord);
-        float2 v10  = float2(depthRcp.x * 2.0f, 0.0f);
-        topRight    = InputDepth.GatherRed(PointClamp, depthCoord + v10);
-        float2 v12  = float2(0.0f, depthRcp.y * 2.0f);
-        bottomLeft  = InputDepth.GatherRed(PointClamp, depthCoord + v12);
-        float2 v14  = float2(depthRcp.x * 2.0f, depthRcp.y * 2.0f);
-        bottomRight = InputDepth.GatherRed(PointClamp, depthCoord + v14);
-    }
+#ifdef HAS_DEPTH
+    float2 depthRcp   = float2(1.0f / float(depthSize.x), 1.0f / float(depthSize.y));
+    float2 depthCoord = float2(tid.xy) * depthRcp;
+    float4 topleft     = InputDepth.GatherRed(PointClamp, depthCoord);
+    float2 v10  = float2(depthRcp.x * 2.0f, 0.0f);
+    float4 topRight    = InputDepth.GatherRed(PointClamp, depthCoord + v10);
+    float2 v12  = float2(0.0f, depthRcp.y * 2.0f);
+    float4 bottomLeft  = InputDepth.GatherRed(PointClamp, depthCoord + v12);
+    float2 v14  = float2(depthRcp.x * 2.0f, depthRcp.y * 2.0f);
+    float4 bottomRight = InputDepth.GatherRed(PointClamp, depthCoord + v14);
 
     float maxC        = Nearer(Nearer(Nearer(topleft.y, topRight.x), bottomLeft.z), bottomRight.w);
     float topleft4    = Nearer(Nearer(Nearer(topleft.y, topleft.x), topleft.z), topleft.w);
     float topLeftMax9 = Nearer(bottomLeft.w, Nearer(Nearer(maxC, topleft4), topRight.w));
 
     float depthclip = 0.0f;
-    // No depth buffer: leave depthclip at 0. That is the same value the
-    // reference yields for pixels at the far plane -- history is trusted and
-    // the neighbourhood colour box is what guards against ghosting. Worse on
-    // disocclusion than real depth, but it runs, and some games never hand an
-    // upscaler a depth texture at all: Dead as Disco drives DLSS through
-    // Streamline and supplies none, with or without OptiPatcher loaded.
-    bool anyGeometry = (hasDepth != 0u) &&
-                       ((depthInverted != 0u) ? (maxC > 1.0e-05f) : (maxC < 1.0f - 1.0e-05f));
+    bool anyGeometry = (depthInverted != 0u) ? (maxC > 1.0e-05f) : (maxC < 1.0f - 1.0e-05f);
+#else
+    // No depth buffer for this permutation: the Gather calls above are compiled
+    // out entirely rather than run behind a runtime branch. A cbuffer-driven
+    // branch around these same GatherRed calls, keyed on a hasDepth flag,
+    // measured worse on this ARM64EC/vkd3d-proton/Turnip stack -- both slower
+    // and visibly wrong (history never rejected, permanent ghosting) -- despite
+    // being logically a no-op when depth is present, so the two cases are two
+    // pipeline states instead of one branchy shader. See
+    // SGSR2FeatureDx12::CreatePipelines.
+    //
+    // depthclip stays 0, same value the reference yields at the far plane:
+    // history is trusted and the neighbourhood colour box is what guards
+    // against ghosting. Worse on disocclusion than real depth, but it runs,
+    // and some games never hand an upscaler a depth texture at all: Dead as
+    // Disco drives DLSS through Streamline and supplies none, with or without
+    // OptiPatcher loaded.
+    float4 topleft = 0.0f, topRight = 0.0f, bottomLeft = 0.0f, bottomRight = 0.0f;
+    // Never read: anyGeometry is false, so the dead if() below that reads these
+    // never runs. Declared anyway because HLSL still type-checks a branch it
+    // will not take.
+    float maxC = 0.0f, topleft4 = 0.0f;
+    float depthclip = 0.0f;
+    bool anyGeometry = false;
+#endif
     if (anyGeometry)
     {
         float topRight4    = Nearer(Nearer(Nearer(topRight.y, topRight.x), topRight.z), topRight.w);

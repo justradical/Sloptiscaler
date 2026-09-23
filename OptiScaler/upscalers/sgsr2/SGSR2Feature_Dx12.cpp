@@ -159,21 +159,33 @@ bool SGSR2FeatureDx12::CreatePipelines(ID3D12Device* device)
 
     _rootSignature->SetName(L"SGSR2_RootSignature");
 
+    // Convert is compiled twice, HAS_DEPTH on and off, rather than branching at
+    // runtime on the cbuffer's hasDepth flag around the depth GatherRed calls.
+    // That runtime branch measured both slower and visibly broken (permanent
+    // ghosting) on this ARM64EC/vkd3d-proton/Turnip stack despite being a
+    // logical no-op whenever depth is present -- see the note in
+    // SGSR2_Shaders.h. Two pipeline states, selected per-dispatch in
+    // EvaluateInternal, sidesteps whatever in that toolchain miscompiles the
+    // branch instead of relying on it being fixed upstream.
+    const D3D_SHADER_MACRO hasDepthMacro[] = { { "HAS_DEPTH", "1" }, { nullptr, nullptr } };
+
     struct
     {
         const char* source;
         const char* name;
+        const D3D_SHADER_MACRO* defines;
         ID3D12PipelineState** target;
     } passes[] = {
-        { SGSR2_ConvertShader, "SGSR2_Convert", &_convertPipeline },
-        { SGSR2_UpscaleShader, "SGSR2_Upscale", &_upscalePipeline },
+        { SGSR2_ConvertShader, "SGSR2_Convert (depth)", hasDepthMacro, &_convertPipeline },
+        { SGSR2_ConvertShader, "SGSR2_Convert (no depth)", nullptr, &_convertPipelineNoDepth },
+        { SGSR2_UpscaleShader, "SGSR2_Upscale", nullptr, &_upscalePipeline },
     };
 
     for (auto& pass : passes)
     {
         // cs_5_0 keeps this compatible with Wine's d3dcompiler and vkd3d-proton,
         // which is what actually runs under Proton on ARM64.
-        ID3DBlob* blob = CompileShader(pass.source, "CSMain", "cs_5_0");
+        ID3DBlob* blob = CompileShader(pass.source, "CSMain", "cs_5_0", pass.defines);
         if (blob == nullptr)
         {
             LOG_ERROR("Failed to compile {0}", pass.name);
@@ -196,6 +208,7 @@ bool SGSR2FeatureDx12::CreatePipelines(ID3D12Device* device)
     }
 
     _convertPipeline->SetName(L"SGSR2_ConvertPSO");
+    _convertPipelineNoDepth->SetName(L"SGSR2_ConvertPSO_NoDepth");
     _upscalePipeline->SetName(L"SGSR2_UpscalePSO");
 
     return true;
@@ -953,7 +966,7 @@ bool SGSR2FeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList
 
         auto table = BindPass(Device, 0, srvs, srvFormats, uavs, uavFormats);
 
-        InCommandList->SetPipelineState(_convertPipeline);
+        InCommandList->SetPipelineState(paramDepth != nullptr ? _convertPipeline : _convertPipelineNoDepth);
         InCommandList->SetComputeRootDescriptorTable(1, table);
 
         auto uavTable = table;
@@ -1167,6 +1180,7 @@ void SGSR2FeatureDx12::ReleaseResources()
     release(_outputBuffer);
     release(_descriptorHeap);
     release(_convertPipeline);
+    release(_convertPipelineNoDepth);
     release(_upscalePipeline);
     release(_rootSignature);
 }

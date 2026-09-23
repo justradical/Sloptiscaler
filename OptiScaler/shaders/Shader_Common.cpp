@@ -6,12 +6,13 @@
 #include <imgui/ImGuiNotify.hpp>
 #endif
 
-ID3DBlob* CompileShader(const char* shaderCode, const char* entryPoint, const char* target)
+ID3DBlob* CompileShader(const char* shaderCode, const char* entryPoint, const char* target,
+                        const D3D_SHADER_MACRO* defines)
 {
     ID3DBlob* shaderBlob = nullptr;
     ID3DBlob* errorBlob = nullptr;
 
-    HRESULT hr = D3DCompile(shaderCode, strlen(shaderCode), nullptr, nullptr, nullptr, entryPoint, target,
+    HRESULT hr = D3DCompile(shaderCode, strlen(shaderCode), nullptr, defines, nullptr, entryPoint, target,
                             D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &shaderBlob, &errorBlob);
 
     if (FAILED(hr))

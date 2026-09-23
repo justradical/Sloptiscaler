@@ -57,6 +57,10 @@ class SGSR2FeatureDx12 : public SGSR2Feature, public IFeature_Dx12
 
     ID3D12RootSignature* _rootSignature = nullptr;
     ID3D12PipelineState* _convertPipeline = nullptr;
+    // HAS_DEPTH undefined: used when the game supplies no depth buffer. See the
+    // note in CreatePipelines for why this is a second PSO rather than a
+    // runtime branch on the cbuffer's hasDepth flag.
+    ID3D12PipelineState* _convertPipelineNoDepth = nullptr;
     ID3D12PipelineState* _upscalePipeline = nullptr;
 
     ID3D12DescriptorHeap* _descriptorHeap = nullptr;

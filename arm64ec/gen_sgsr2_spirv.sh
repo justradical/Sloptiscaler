@@ -49,9 +49,23 @@ c++ -std=c++17 -I"$SRC" -o "$WORK/dump" "$WORK/dump.cpp"
 # 2. HLSL -> SPIR-V. cs_6_0 rather than the cs_5_0 the D3D12 path uses at
 #    runtime: SPIR-V generation needs a DXIL-era profile, and there is no
 #    Wine d3dcompiler in the way here to constrain it.
+#
+# Convert also gets -D HAS_DEPTH=1: the D3D12 backend compiles two PSOs, with
+# and without it, and picks per-dispatch depending on whether the game supplies
+# a depth buffer (see SGSR2FeatureDx12::CreatePipelines) -- a cbuffer-driven
+# runtime branch around the same GatherRed calls measured broken on this
+# ARM64EC/vkd3d-proton/Turnip stack, both slower and permanently ghosting, even
+# though it is a logical no-op whenever depth is present. The Vulkan backend
+# has not run on real hardware yet, so it gets only the HAS_DEPTH permutation
+# for now -- correct disocclusion for the common case of a game that does
+# supply depth, rather than a second, wholly untested pipeline-selection path.
+# A game with no depth buffer at all is not yet handled here; that needs the
+# same two-PSO treatment SGSR2Feature_Dx12 has once something exercises it.
 for pass in convert upscale; do
+    extra=()
+    [ "$pass" = "convert" ] && extra=(-D HAS_DEPTH=1)
     ( cd "$TOOLS" && wine dxc.exe -spirv -T cs_6_0 -E CSMain -O3 -Qstrip_debug \
-        -D VK_MODE -Fo "$WORK/sgsr2_${pass}.spv" "$WORK/sgsr2_${pass}.hlsl" )
+        -D VK_MODE "${extra[@]}" -Fo "$WORK/sgsr2_${pass}.spv" "$WORK/sgsr2_${pass}.hlsl" )
     if command -v spirv-val >/dev/null 2>&1; then
         spirv-val "$WORK/sgsr2_${pass}.spv"
     fi
