@@ -9,6 +9,7 @@
 #include <misc/IdentifyGpu.h>
 #include <hooks/Reflex_Hooks.h>
 #include <menu/menu_overlay_base.h>
+#include <menu/menu_i18n.h>
 #include <framegen/nvngx/Nvngx_FG.h>
 #include <proxies/KernelBase_Proxy.h>
 #include <imgui/ImGuiNotify.hpp>
@@ -226,7 +227,8 @@ sl::Result StreamlineHooks::hkslInit(const sl::Preferences& pref, uint64_t sdkVe
 
             if (!missingDlls.empty())
             {
-                std::string toastMsg = "You are missing the following dlls from the streamline folder:\n";
+                std::string toastMsg =
+                    OptiI18n::Format("You are missing the following dlls from the streamline folder:\n");
                 for (const auto& missingDll : missingDlls)
                 {
                     toastMsg += "- " + missingDll + "\n";

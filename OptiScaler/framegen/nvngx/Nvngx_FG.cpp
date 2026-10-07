@@ -12,6 +12,7 @@
 #include "Nvngx_FFX.h"
 #include "Nvngx_Combo.h"
 #include <imgui/ImGuiNotify.hpp>
+#include <menu/menu_i18n.h>
 #include <nvsdk_ngx_vk.h>
 
 IFGNvngx* Nvngx_FG::getProvider()
@@ -109,18 +110,27 @@ IFGNvngx* Nvngx_FG::getProvider()
             LOG_WARN("Nvngx FG provider {} is not available, falling back to {}", formatProvider(selectedProvider),
                      formatProvider(fallback));
 
-            ImGui::InsertNotification({ ImGuiToastType::Warning, 20000,
-                                        std::format("{} is not available.\nFalling back to {}.",
-                                                    formatProvider(selectedProvider), formatProvider(fallback))
-                                            .c_str() });
+            const char* unavailableProvider = formatProvider(selectedProvider);
+            const char* fallbackProvider = formatProvider(fallback);
+
+            ImGui::InsertNotification(
+                { ImGuiToastType::Warning, 20000,
+                  std::vformat(OptiI18n::Format("{} is not available.\nFalling back to {}."),
+                               std::make_format_args(unavailableProvider, fallbackProvider))
+                      .c_str() });
 
             return _provider.get();
         }
 
         LOG_ERROR("Nvngx FG provider {} is not available and can't fallback", formatProvider(selectedProvider));
+
+        const char* unavailableProvider = formatProvider(selectedProvider);
+
         ImGui::InsertNotification(
             { ImGuiToastType::Error, 20000,
-              std::format("{} is not available and can't fallback", formatProvider(selectedProvider)).c_str() });
+              std::vformat(OptiI18n::Format("{} is not available and can't fallback"),
+                           std::make_format_args(unavailableProvider))
+                  .c_str() });
 
         Config::Instance()->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
         State::Instance().activeFgNvngx = FGNvngxReplacement::None;

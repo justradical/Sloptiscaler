@@ -7,6 +7,7 @@
 #include <include/detours/detours.h>
 #include <include/d3dx/d3dx12.h>
 #include <imgui/ImGuiNotify.hpp>
+#include <menu/menu_i18n.h>
 
 inline void XeSSLogCallback(const char* Message, xess_logging_level_t Level)
 {
@@ -46,7 +47,9 @@ bool XeSSFeature::InitXeSS(ID3D12Device* device, const NVSDK_NGX_Parameter* InPa
         {
             auto str = ResultToString(ret);
             ImGui::InsertNotification(
-                { ImGuiToastType::Error, 10000, std::format("Couldn't create XeSS context\n{}", str).c_str() });
+                { ImGuiToastType::Error, 10000,
+                  std::vformat(OptiI18n::Format("Couldn't create XeSS context\n{}"), std::make_format_args(str))
+                      .c_str() });
             LOG_ERROR("xessD3D12CreateContext error: {0}", str);
             return false;
         }

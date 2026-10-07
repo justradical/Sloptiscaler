@@ -1,9 +1,12 @@
 ﻿#include "pch.h"
 #include "menu_common.h"
+#include "menu_i18n.h"
+#include "overlay_control.h"
 
 #include "input/input_system.h"
 
 #include "font/Hack_Compressed.h"
+#include "font/CjkSubset_Compressed.h"
 
 #include <proxies/XeSS_Proxy.h>
 #include <proxies/XeFG_Proxy.h>
@@ -30,6 +33,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <type_traits>
 #include <misc/IdentifyGpu.h>
@@ -71,6 +75,12 @@ static Upscaler currentBackend = Upscaler::Reset;
 static std::string currentBackendName = "";
 static int refreshRate = 0;
 static ImVec2 lastPosition(-1000.0f, -1000.0f);
+
+// Direct overlay-control mailbox bridge. Created by Init(), reset by Shutdown(),
+// polled at most once per frame from RenderMenu(). `lastControlPollMs` holds the
+// timestamp of the previous poll so the elapsed time can be handed to the bridge.
+static std::unique_ptr<OptiControl::Bridge> controlBridge;
+static double lastControlPollMs = 0.0;
 
 static ImVec2 splashPosition(-1000.0f, -1000.0f);
 static ImVec2 splashSize(0.0f, 0.0f);
@@ -237,6 +247,11 @@ struct FlagDefinition
 
 inline std::string StrFmt(const char* fmt, ...)
 {
+    // Translate the format string (placeholders preserved) before formatting, so
+    // an English format reaches the same wording a Chinese display expects. An
+    // unknown format is returned byte-for-byte by OptiI18n::Format.
+    fmt = OptiI18n::Format(fmt);
+
     va_list args;
     va_start(args, fmt);
     int len = std::vsnprintf(nullptr, 0, fmt, args);
@@ -1438,11 +1453,54 @@ void MenuCommon::UpdateMenuInputMode(RenderMenuContext& ctx)
     }
 }
 
+void MenuCommon::SetMenuVisible(bool visible)
+{
+    _isVisible = visible;
+
+    ImGuiIO& io = ImGui::GetIO();
+
+    if (_isVisible)
+    {
+        io.ClearEventsQueue();
+        io.ClearInputKeys();
+        io.ClearInputMouse();
+
+        OptiInput::ResetMenuInputTransientState();
+
+        ApplyThemeStyle();
+
+        refreshRate = Util::GetActiveRefreshRate(_handle);
+
+        auto config = Config::Instance();
+        auto optiPath = std::filesystem::path(config->MainDllPath.value());
+        State::Instance().artursFgFileAvailable = enablerExists.Get(optiPath / L"dlss-enabler-headless.dll");
+        State::Instance().nukemsFgFileAvailable = nukemsExists.Get(optiPath / L"dlssg_to_fsr3_amd_is_better.dll");
+
+        if (State::Instance().currentFeature != nullptr)
+        {
+            if (State::Instance().currentFeature->GetUpscalerType() == Upscaler::DLSSD)
+                comboPreset = config->DLSSDRenderPresetForAll.value_or_default();
+            else if (State::Instance().currentFeature->GetUpscalerType() == Upscaler::DLSS)
+                comboPreset = config->RenderPresetForAll.value_or_default();
+        }
+    }
+    else
+    {
+        ImGui::CloseCurrentPopup();
+
+        _showMipmapCalcWindow = false;
+        _showHudlessWindow = false;
+    }
+
+    io.MouseDrawCursor = _isVisible;
+    io.WantCaptureKeyboard = _isVisible;
+    io.WantCaptureMouse = _isVisible;
+}
+
 void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
 {
     auto& state = ctx.state;
     auto config = ctx.config;
-    auto& io = ctx.io;
 
     // Handle Inputs
     {
@@ -1473,45 +1531,12 @@ void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
         if (inputMenu)
         {
             inputMenu = false;
-            _isVisible = !_isVisible;
+
+            // Keyboard toggle requests the opposite of the actual current state;
+            // the shared setter owns every visibility side effect.
+            SetMenuVisible(!_isVisible);
 
             LOG_DEBUG("Menu key pressed, {0}", _isVisible ? "opening ImGui" : "closing ImGui");
-
-            if (_isVisible)
-            {
-                io.ClearEventsQueue();
-                io.ClearInputKeys();
-                io.ClearInputMouse();
-
-                OptiInput::ResetMenuInputTransientState();
-
-                ApplyThemeStyle();
-
-                refreshRate = Util::GetActiveRefreshRate(_handle);
-
-                auto optiPath = std::filesystem::path(Config::Instance()->MainDllPath.value());
-                state.artursFgFileAvailable = enablerExists.Get(optiPath / L"dlss-enabler-headless.dll");
-                state.nukemsFgFileAvailable = nukemsExists.Get(optiPath / L"dlssg_to_fsr3_amd_is_better.dll");
-
-                if (State::Instance().currentFeature != nullptr)
-                {
-                    if (State::Instance().currentFeature->GetUpscalerType() == Upscaler::DLSSD)
-                        comboPreset = config->DLSSDRenderPresetForAll.value_or_default();
-                    else if (State::Instance().currentFeature->GetUpscalerType() == Upscaler::DLSS)
-                        comboPreset = config->RenderPresetForAll.value_or_default();
-                }
-            }
-            else
-            {
-                ImGui::CloseCurrentPopup();
-
-                _showMipmapCalcWindow = false;
-                _showHudlessWindow = false;
-            }
-
-            io.MouseDrawCursor = _isVisible;
-            io.WantCaptureKeyboard = _isVisible;
-            io.WantCaptureMouse = _isVisible;
         }
 
         inputFpsCycle = false;
@@ -1915,12 +1940,14 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             auto formatFg = [&](std::string_view name, int maxFakeFrames)
             {
                 if (fakeFramesCount > maxFakeFrames)
-                    return std::format(" ({} Doesn't support more than {}x)", name, maxFakeFrames);
+                    return std::vformat(OptiI18n::Format(" ({} Doesn't support more than {}x)"),
+                                        std::make_format_args(name, maxFakeFrames));
 
                 else if (fakeFramesCount == 0)
-                    return std::format(" ({} off)", name);
+                    return std::vformat(OptiI18n::Format(" ({} off)"), std::make_format_args(name));
 
-                return std::format(" ({} x{})", name, fakeFramesCount + 1);
+                const int frameMultiplier = fakeFramesCount + 1;
+                return std::vformat(OptiI18n::Format(" ({} x{})"), std::make_format_args(name, frameMultiplier));
             };
 
             const FGNvngxReplacement activeNvngxFg = state.activeFgNvngx;
@@ -2467,7 +2494,7 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
 
             ImGui::SameLine(0.0f, 6.0f);
             spoofingText = config->DxgiSpoofing.value_or_default() ? "On" : "Off";
-            ImGui::Text("| Spoof: %s", spoofingText.c_str());
+            ImGui::Text("| Spoof: %s", OptiI18n::Format(spoofingText.c_str()));
 
             if (!usesDlssd)
                 AddDx11Backends(currentBackend);
@@ -2485,7 +2512,7 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
 
             ImGui::SameLine(0.0f, 6.0f);
             spoofingText = config->DxgiSpoofing.value_or_default() ? "On" : "Off";
-            ImGui::Text("| Spoof: %s", spoofingText.c_str());
+            ImGui::Text("| Spoof: %s", OptiI18n::Format(spoofingText.c_str()));
 
             if (!usesDlssd)
                 AddDx12Backends(currentBackend);
@@ -2515,7 +2542,7 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
                 spoofingText = "Off";
 
             ImGui::SameLine(0.0f, 6.0f);
-            ImGui::Text("| Spoof: %s", spoofingText.c_str());
+            ImGui::Text("| Spoof: %s", OptiI18n::Format(spoofingText.c_str()));
 
             if (!usesDlssd)
                 AddVulkanBackends(currentBackend);
@@ -4169,7 +4196,9 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
         ImGui::SameLine();
         if (auto count = state.dlssgDetectedInterpolationCount; count > 0)
         {
-            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), std::format("ON {}x", count + 1).c_str());
+            const int frameMultiplier = count + 1;
+            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)),
+                               std::vformat(OptiI18n::Format("ON {}x"), std::make_format_args(frameMultiplier)).c_str());
         }
         else
         {
@@ -4635,8 +4664,10 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
                 ImGui::SameLine();
                 if (auto count = state.dlssgDetectedInterpolationCount; count > 0)
                 {
+                    const int frameMultiplier = count + 1;
                     ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)),
-                                       std::format("ON {}x", count + 1).c_str());
+                                       std::vformat(OptiI18n::Format("ON {}x"), std::make_format_args(frameMultiplier))
+                                           .c_str());
                 }
                 else
                 {
@@ -5090,16 +5121,20 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
                 currentMethod = "Fallback";
         }
 
+        // Display-only translation of the selected base method. The original
+        // English currentMethod (and its technical method names) stays untouched.
+        std::string currentMethodDisplay = OptiI18n::Format(currentMethod.c_str());
+
         if (state.rtssReflexInjection)
-            currentMethod.append(" (RTSS)");
+            currentMethodDisplay.append(OptiI18n::Format(" (RTSS)"));
 
         const bool fakenvapiInactive = (fakenvapi::isUsingAsMainNvapi() || fakenvapiMode == LowLatencyMode::XeLL) &&
                                        !fakenvapi::isLowLatencyActive() && state.reflexLimitsFps;
 
         if (fakenvapiInactive)
-            currentMethod.append(" (inactive)");
+            currentMethodDisplay.append(OptiI18n::Format(" (inactive)"));
 
-        ImGui::Text("Current method: %s", currentMethod.c_str());
+        ImGui::Text("Current method: %s", currentMethodDisplay.c_str());
 
         if (fakenvapiMode == LowLatencyMode::AntiLag2)
             ShowHelpMarker("FSR Anti-Lag 2.0 is the new name for AntiLag 2\nDon't ask me why");
@@ -5789,7 +5824,7 @@ void MenuCommon::RenderActiveImageSettings(RenderMenuContext& ctx)
                 if (currentFeature != nullptr && !currentFeature->IsFrozen())
                 {
                     ImGui::Text("Output Scaling is %s, Target Res: %dx%d (%.2f)\nJitter Count: %d",
-                                config->OutputScalingEnabled.value_or_default() ? "ENABLED" : "DISABLED",
+                                OptiI18n::Format(config->OutputScalingEnabled.value_or_default() ? "ENABLED" : "DISABLED"),
                                 (uint32_t) (currentFeature->DisplayWidth() * _ssRatio),
                                 (uint32_t) (currentFeature->DisplayHeight() * _ssRatio),
                                 ((float) currentFeature->DisplayWidth() * _ssRatio) /
@@ -7691,6 +7726,77 @@ void KeyUp(UINT vKey)
     inputFpsCycle = vKey == Config::Instance()->FpsCycleShortcutKey.value_or_default();
 }
 
+// A 32-character lowercase-hex session tag, unique per process launch and per
+// Init(). It is a mailbox-session discriminator, not a security token, so a fold
+// of the clock, the process id and an init counter is enough.
+static std::string MakeControlSession()
+{
+    static uint64_t initCounter = 0;
+    ++initCounter;
+
+    const auto ticks = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    const uint64_t pid = static_cast<uint64_t>(GetCurrentProcessId());
+
+    uint64_t hi = ticks ^ (pid * 0x9E3779B97F4A7C15ull);
+    uint64_t lo = (initCounter * 0xD1B54A32D192ED03ull) ^ (ticks >> 17) ^ (pid << 32);
+
+    static const char* kHex = "0123456789abcdef";
+    char buf[33];
+    for (int i = 15; i >= 0; --i)
+    {
+        buf[i] = kHex[hi & 0xF];
+        hi >>= 4;
+    }
+    for (int i = 31; i >= 16; --i)
+    {
+        buf[i] = kHex[lo & 0xF];
+        lo >>= 4;
+    }
+    buf[32] = '\0';
+    return std::string(buf);
+}
+
+void MenuCommon::PollOverlayControl(RenderMenuContext& ctx)
+{
+    if (controlBridge == nullptr)
+        return;
+
+    int elapsedMs = 0;
+    if (lastControlPollMs > 0.0 && ctx.now > lastControlPollMs)
+        elapsedMs = static_cast<int>(ctx.now - lastControlPollMs);
+    lastControlPollMs = ctx.now;
+
+    OptiControl::UiState actual;
+    actual.menuVisible = _isVisible;
+    actual.fpsVisible = ctx.config->ShowFps.value_or_default();
+    actual.language = std::string(OptiI18n::Language());
+
+    const auto action = controlBridge->poll(elapsedMs, actual);
+    if (!action)
+        return;
+
+    // A handed-out command mutates only its own intended UI state; the next poll
+    // reports the real state and only then does the bridge acknowledge it.
+    switch (action->target)
+    {
+        case OptiControl::Target::Menu:
+            // Apply only when the value actually differs, so a redundant command
+            // never re-runs the open side effects.
+            if (action->enabled != _isVisible)
+                SetMenuVisible(action->enabled);
+            break;
+
+        case OptiControl::Target::Fps:
+            if (action->enabled != ctx.config->ShowFps.value_or_default())
+                ctx.config->ShowFps = action->enabled;
+            break;
+
+        case OptiControl::Target::Language:
+            OptiI18n::SetLanguage(action->language);
+            break;
+    }
+}
+
 bool MenuCommon::RenderMenu()
 {
     if (!_isInited)
@@ -7699,6 +7805,10 @@ bool MenuCommon::RenderMenu()
     RenderMenuContext ctx { State::Instance(), Config::Instance(), ImGui::GetIO() };
     ctx.now = Util::MillisecondsNow();
     ctx.currentFeature = ctx.state.currentFeature;
+
+    // 0) Service the direct overlay-control mailbox once per frame, before any
+    //    input handling or new ImGui frame, so a command applies within this frame.
+    PollOverlayControl(ctx);
 
     // 1) Collect timing and input state before any ImGui drawing.
     UpdateRenderTiming(ctx);
@@ -7810,6 +7920,48 @@ void MenuCommon::Init(HWND InHwnd, bool isUWP)
         }
     }
 
+    // Merge the small embedded "OptiScaler CJK UI" subset (built by
+    // work/build-cjk-subset.py and compressed with the official ImGui
+    // font_compressor) into the base font, so the UI can switch English <-> Chinese
+    // at runtime without loading a system font, replacing the default globally or
+    // rebuilding the atlas texture. ASCII/English glyphs keep coming from the base
+    // font; only the subset's CJK glyphs are added on top.
+    if (io.Fonts->Fonts.empty())
+        io.FontDefault = io.Fonts->AddFontDefault();
+
+    if (!io.Fonts->Fonts.empty())
+    {
+        ImFont* baseFont = io.FontDefault != nullptr ? io.FontDefault : io.Fonts->Fonts[0];
+
+        // Permanent glyph range built once from the Chinese dictionary texts. ImGui
+        // only stores the pointer, so this array must outlive the atlas: a
+        // function-local static does (program lifetime), and the guard keeps a
+        // re-init from rebuilding it.
+        static ImVector<ImWchar> cjkGlyphRanges;
+        if (cjkGlyphRanges.empty())
+        {
+            ImFontGlyphRangesBuilder builder;
+            std::size_t entryCount = 0;
+            const OptiI18n::Detail::Entry* entries = OptiI18n::Detail::Entries(entryCount);
+            for (std::size_t i = 0; i < entryCount; ++i)
+            {
+                if (entries[i].chinese != nullptr)
+                    builder.AddText(entries[i].chinese);
+            }
+            builder.BuildRanges(&cjkGlyphRanges);
+        }
+
+        ImFontConfig cjkConfig;
+        cjkConfig.MergeMode = true;
+        cjkConfig.PixelSnapH = true;
+        // Match the base font so the merged CJK source scales 1:1 (ImGui 1.92 WIP:
+        // ImFont::LegacySize was replaced by ImFont::DefaultSize ==
+        // Sources[0]->SizePixels, which ImFontAtlas uses as the merge reference).
+        io.Fonts->AddFontFromMemoryCompressedTTF(CjkSubset_compressed_data,
+                                                 static_cast<int>(CjkSubset_compressed_size),
+                                                 baseFont->DefaultSize, &cjkConfig, cjkGlyphRanges.Data);
+    }
+
     if (!Config::Instance()->OverlayMenu.value_or_default())
     {
         _hdrTonemapApplied = false;
@@ -7822,6 +7974,20 @@ void MenuCommon::Init(HWND InHwnd, bool isUWP)
               (ULONG64) _handle, IsWindow(_handle), hwndPid, GetCurrentProcessId(), hwndTid, GetCurrentThreadId());
 
     OptiInput::Initialize(_handle, isUWP);
+
+    // Direct overlay-control bridge: read the requested display language from the
+    // environment, then (re)create the mailbox with a fresh per-init session. The
+    // mailbox lives in an "OptiScaler" directory next to the core DLL.
+    {
+        const char* requestedLanguage = std::getenv("OPTISCALER_UI_LANGUAGE");
+        OptiI18n::SetLanguage(requestedLanguage != nullptr ? requestedLanguage : "en");
+
+        // The installed DLL's own folder, not the library search path: the
+        // manifest directories are where dxgi.dll landed.
+        auto optiPath = Util::DllPath().parent_path() / "OptiScaler";
+        controlBridge = std::make_unique<OptiControl::Bridge>(optiPath, MakeControlSession());
+        lastControlPollMs = 0.0;
+    }
 
     ApplyThemeStyle();
     _isInited = true;
@@ -7854,6 +8020,9 @@ void MenuCommon::Shutdown()
 
     ImGui::DestroyContext();
 
+    controlBridge.reset();
+    lastControlPollMs = 0.0;
+
     _handle = nullptr;
     _isInited = false;
     _isVisible = false;
@@ -7864,15 +8033,7 @@ void MenuCommon::HideMenu()
     if (!_isVisible)
         return;
 
-    _isVisible = false;
-
-    ImGuiIO& io = ImGui::GetIO();
-    (void) io;
-
-    _showMipmapCalcWindow = false;
-    _showHudlessWindow = false;
-
-    io.MouseDrawCursor = _isVisible;
-    io.WantCaptureKeyboard = _isVisible;
-    io.WantCaptureMouse = _isVisible;
+    // Reuse the shared close path so popups, sub-windows and ImGui capture flags
+    // are cleared identically whether the menu closes by key or programmatically.
+    SetMenuVisible(false);
 }
