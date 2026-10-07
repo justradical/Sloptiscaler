@@ -1119,6 +1119,10 @@ CODE
 #ifndef IMGUI_DISABLE
 #include "imgui_internal.h"
 
+// OptiScaler bilingual display layer: English is the source and the fallback;
+// only display copies are translated, never ids/labels/persistence keys.
+#include "../../menu/menu_i18n.h"
+
 // System includes
 #include <stdio.h>      // vsnprintf, sscanf, printf
 #include <stdint.h>     // intptr_t
@@ -3716,9 +3720,21 @@ void ImGui::RenderText(ImVec2 pos, const char* text, const char* text_end, bool 
 
     if (text != text_display_end)
     {
-        window->DrawList->AddText(g.Font, g.FontSize, pos, GetColorU32(ImGuiCol_Text), text, text_display_end);
+        // Display translation only: 'text'/'text_end' stay untouched so label
+        // ids and hashed text keep the original English bytes. The owned
+        // translation is used for both rendering and logging.
+        const char* render_text = text;
+        const char* render_text_end = text_display_end;
+        std::string translation;
+        if (OptiI18n::Language() != std::string_view("en"))
+        {
+            translation = OptiI18n::TranslateRange(text, text_display_end, hide_text_after_hash);
+            render_text = translation.data();
+            render_text_end = render_text + translation.size();
+        }
+        window->DrawList->AddText(g.Font, g.FontSize, pos, GetColorU32(ImGuiCol_Text), render_text, render_text_end);
         if (g.LogEnabled)
-            LogRenderedText(&pos, text, text_display_end);
+            LogRenderedText(&pos, render_text, render_text_end);
     }
 }
 
@@ -3732,9 +3748,19 @@ void ImGui::RenderTextWrapped(ImVec2 pos, const char* text, const char* text_end
 
     if (text != text_end)
     {
-        window->DrawList->AddText(g.Font, g.FontSize, pos, GetColorU32(ImGuiCol_Text), text, text_end, wrap_width);
+        // Display translation only; see RenderText().
+        const char* render_text = text;
+        const char* render_text_end = text_end;
+        std::string translation;
+        if (OptiI18n::Language() != std::string_view("en"))
+        {
+            translation = OptiI18n::TranslateRange(text, text_end, false);
+            render_text = translation.data();
+            render_text_end = render_text + translation.size();
+        }
+        window->DrawList->AddText(g.Font, g.FontSize, pos, GetColorU32(ImGuiCol_Text), render_text, render_text_end, wrap_width);
         if (g.LogEnabled)
-            LogRenderedText(&pos, text, text_end);
+            LogRenderedText(&pos, render_text, render_text_end);
     }
 }
 
@@ -3745,9 +3771,21 @@ void ImGui::RenderTextWrapped(ImVec2 pos, const char* text, const char* text_end
 // better advantage of the render function taking size into account for coarse clipping.
 void ImGui::RenderTextClippedEx(ImDrawList* draw_list, const ImVec2& pos_min, const ImVec2& pos_max, const char* text, const char* text_display_end, const ImVec2* text_size_if_known, const ImVec2& align, const ImRect* clip_rect)
 {
+    // Display translation only. 'text'/'text_display_end' are the label bytes a
+    // caller may have derived from '##'; they are never modified.
+    const char* render_text = text;
+    const char* render_text_end = text_display_end;
+    std::string translation;
+    if (OptiI18n::Language() != std::string_view("en"))
+    {
+        translation = OptiI18n::TranslateRange(text, text_display_end, false);
+        render_text = translation.data();
+        render_text_end = render_text + translation.size();
+    }
+
     // Perform CPU side clipping for single clipped element to avoid using scissor state
     ImVec2 pos = pos_min;
-    const ImVec2 text_size = text_size_if_known ? *text_size_if_known : CalcTextSize(text, text_display_end, false, 0.0f);
+    const ImVec2 text_size = text_size_if_known ? *text_size_if_known : CalcTextSize(render_text, render_text_end, false, 0.0f);
 
     const ImVec2* clip_min = clip_rect ? &clip_rect->Min : &pos_min;
     const ImVec2* clip_max = clip_rect ? &clip_rect->Max : &pos_max;
@@ -3763,11 +3801,11 @@ void ImGui::RenderTextClippedEx(ImDrawList* draw_list, const ImVec2& pos_min, co
     if (need_clipping)
     {
         ImVec4 fine_clip_rect(clip_min->x, clip_min->y, clip_max->x, clip_max->y);
-        draw_list->AddText(NULL, 0.0f, pos, GetColorU32(ImGuiCol_Text), text, text_display_end, 0.0f, &fine_clip_rect);
+        draw_list->AddText(NULL, 0.0f, pos, GetColorU32(ImGuiCol_Text), render_text, render_text_end, 0.0f, &fine_clip_rect);
     }
     else
     {
-        draw_list->AddText(NULL, 0.0f, pos, GetColorU32(ImGuiCol_Text), text, text_display_end, 0.0f, NULL);
+        draw_list->AddText(NULL, 0.0f, pos, GetColorU32(ImGuiCol_Text), render_text, render_text_end, 0.0f, NULL);
     }
 }
 
@@ -3794,7 +3832,21 @@ void ImGui::RenderTextEllipsis(ImDrawList* draw_list, const ImVec2& pos_min, con
     ImGuiContext& g = *GImGui;
     if (text_end_full == NULL)
         text_end_full = FindRenderedTextEnd(text);
-    const ImVec2 text_size = text_size_if_known ? *text_size_if_known : CalcTextSize(text, text_end_full, false, 0.0f);
+
+    // Display translation first, so sizing, ellipsis fitting and rendering all
+    // use the translated text. 'text'/'text_end_full' (the original label bytes)
+    // are left untouched.
+    const char* render_text = text;
+    const char* render_text_end_full = text_end_full;
+    std::string translation;
+    if (OptiI18n::Language() != std::string_view("en"))
+    {
+        translation = OptiI18n::TranslateRange(text, text_end_full, false);
+        render_text = translation.data();
+        render_text_end_full = render_text + translation.size();
+    }
+
+    const ImVec2 text_size = text_size_if_known ? *text_size_if_known : CalcTextSize(render_text, render_text_end_full, false, 0.0f);
 
     //draw_list->AddLine(ImVec2(pos_max.x, pos_min.y - 4), ImVec2(pos_max.x, pos_max.y + 6), IM_COL32(0, 0, 255, 255));
     //draw_list->AddLine(ImVec2(ellipsis_max_x, pos_min.y - 2), ImVec2(ellipsis_max_x, pos_max.y + 3), IM_COL32(0, 255, 0, 255));
@@ -3816,8 +3868,8 @@ void ImGui::RenderTextEllipsis(ImDrawList* draw_list, const ImVec2& pos_min, con
 
         // We can now claim the space between pos_max.x and ellipsis_max.x
         const float text_avail_width = ImMax((ImMax(pos_max.x, ellipsis_max_x) - ellipsis_width) - pos_min.x, 1.0f);
-        float text_size_clipped_x = font->CalcTextSizeA(font_size, text_avail_width, 0.0f, text, text_end_full, &text_end_ellipsis).x;
-        while (text_end_ellipsis > text && ImCharIsBlankA(text_end_ellipsis[-1]))
+        float text_size_clipped_x = font->CalcTextSizeA(font_size, text_avail_width, 0.0f, render_text, render_text_end_full, &text_end_ellipsis).x;
+        while (text_end_ellipsis > render_text && ImCharIsBlankA(text_end_ellipsis[-1]))
         {
             // Trim trailing space before ellipsis (FIXME: Supporting non-ascii blanks would be nice, for this we need a function to backtrack in UTF-8 text)
             text_end_ellipsis--;
@@ -3825,18 +3877,18 @@ void ImGui::RenderTextEllipsis(ImDrawList* draw_list, const ImVec2& pos_min, con
         }
 
         // Render text, render ellipsis
-        RenderTextClippedEx(draw_list, pos_min, pos_max, text, text_end_ellipsis, &text_size, ImVec2(0.0f, 0.0f));
+        RenderTextClippedEx(draw_list, pos_min, pos_max, render_text, text_end_ellipsis, &text_size, ImVec2(0.0f, 0.0f));
         ImVec4 cpu_fine_clip_rect(pos_min.x, pos_min.y, pos_max.x, pos_max.y);
         ImVec2 ellipsis_pos = ImTrunc(ImVec2(pos_min.x + text_size_clipped_x, pos_min.y));
         font->RenderChar(draw_list, font_size, ellipsis_pos, GetColorU32(ImGuiCol_Text), font->EllipsisChar, &cpu_fine_clip_rect);
     }
     else
     {
-        RenderTextClippedEx(draw_list, pos_min, pos_max, text, text_end_full, &text_size, ImVec2(0.0f, 0.0f));
+        RenderTextClippedEx(draw_list, pos_min, pos_max, render_text, render_text_end_full, &text_size, ImVec2(0.0f, 0.0f));
     }
 
     if (g.LogEnabled)
-        LogRenderedText(&pos_min, text, text_end_full);
+        LogRenderedText(&pos_min, render_text, render_text_end_full);
 }
 
 // Render a rectangle shaped with optional rounding and borders
@@ -6158,11 +6210,26 @@ ImVec2 ImGui::CalcTextSize(const char* text, const char* text_end, bool hide_tex
     else
         text_display_end = text_end;
 
+    // Display translation only. Sizing must match what RenderText()/helpers
+    // actually draw, so the same visible range ('text'..'text_display_end',
+    // never the original label bytes) is translated here. The
+    // '##' id and any hashed text keep the original English bytes, so widget
+    // ids and alignment derived from 'text' are unchanged.
+    const char* text_measure = text;
+    const char* text_measure_end = text_display_end;
+    std::string translation;
+    if (OptiI18n::Language() != std::string_view("en"))
+    {
+        translation = OptiI18n::TranslateRange(text, text_display_end, hide_text_after_double_hash);
+        text_measure = translation.data();
+        text_measure_end = text_measure + translation.size();
+    }
+
     ImFont* font = g.Font;
     const float font_size = g.FontSize;
     if (text == text_display_end)
         return ImVec2(0.0f, font_size);
-    ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, wrap_width, text, text_display_end, NULL);
+    ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, wrap_width, text_measure, text_measure_end, NULL);
 
     // Round
     // FIXME: This has been here since Dec 2015 (7b0bf230) but down the line we want this out.

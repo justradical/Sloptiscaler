@@ -51,7 +51,11 @@ for f in "$ROOT"/OptiScaler/shaders/*/precompile/*_Shader*.h; do
   [ "$up" != "$b" ] && ln -sf "$f" "$SHIM/precompile/$up"
 done
 printf '#pragma once\n#define VER_BUILD_DATE "%s"\n' "$(date +%Y-%m-%d)" > "$SHIM/resource_build_date.h"
-printf '#pragma once\n#define VER_BUILD_COMMIT "%s"\n' "$(git -C "$ROOT" rev-parse --short HEAD)" > "$SHIM/resource_build_commit.h"
+# Commit stamp defaults to this checkout's HEAD, but OPTISCALER_BUILD_COMMIT may
+# override it so a source snapshot without .git can still embed accurate metadata
+# (e.g. OPTISCALER_BUILD_COMMIT=f80e4da3+control-zh1).
+BUILD_COMMIT="${OPTISCALER_BUILD_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD)}"
+printf '#pragma once\n#define VER_BUILD_COMMIT "%s"\n' "$BUILD_COMMIT" > "$SHIM/resource_build_commit.h"
 
 # ------------------------------------------------------------------ Detours
 if [ ! -f "$OUT/libdetours.a" ]; then

@@ -7,6 +7,7 @@
 #include <SysUtils.h>
 
 #include <menu/menu_overlay_vk.h>
+#include <menu/overlay_route.h>
 #include <proxies/KernelBase_Proxy.h>
 #include <upscaler_time/UpscalerTime_Vk.h>
 
@@ -56,7 +57,13 @@ static HWND ResolveOverlayHwnd()
 }
 
 
+// Serialises HookDevice and TryUseDx11Overlay so the DX11 overlay route and the
+// Vulkan hook installation cannot race for the one renderer.
 static std::mutex _vkPresentMutex;
+
+// ARM64EC DXVK overlay route. See menu/overlay_route.h. Its selection is read
+// from the surface callback and the DXVK present path.
+static OptiOverlayRoute::Dx11Fallback _dx11OverlayRoute;
 
 PFN_vkCreateDevice o_vkCreateDevice = nullptr;
 PFN_vkCreateInstance o_vkCreateInstance = nullptr;
@@ -79,6 +86,13 @@ static VkResult hkvkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateI
 
 static void HookDevice(VkDevice InDevice)
 {
+    std::lock_guard<std::mutex> lock(_vkPresentMutex);
+
+    // The DX11 fallback already owns the single ImGui context: a later, unrelated
+    // (dummy) device probe must not introduce a second renderer.
+    if (_dx11OverlayRoute.IsSelected())
+        return;
+
     if (o_CreateSwapchainKHR != nullptr || State::Instance().vulkanSkipHooks)
         return;
 
@@ -111,6 +125,37 @@ static void HookDevice(VkDevice InDevice)
     }
 }
 
+// ARM64EC + DXVK only. The game presents through a D3D11 swapchain that DXVK
+// backs with Vulkan, but the process may never reach the PE-side Vulkan
+// presentation hooks, so the Vulkan overlay is never installed and the DX11
+// overlay is the only path that can draw. The DX11 fallback is offered here, but
+// only while the Vulkan overlay hooks are still not installed: if either of them
+// is present the Vulkan overlay already owns the present chain and keeps
+// priority, so the fallback is denied.
+bool VulkanHooks::TryUseDx11Overlay(bool isD3D11, bool willPresent)
+{
+#if defined(_M_ARM64EC) || defined(__arm64ec__)
+    // Facts that may run device probes are collected before taking the hook
+    // mutex: IdentifyGpu::getPrimaryGpu() can re-enter the Vulkan hooks and would
+    // deadlock against a lock held here.
+    const bool usesDxvk = IdentifyGpu::getPrimaryGpu().usesDxvk;
+    const bool overlayEnabled = Config::Instance()->OverlayMenu.value_or_default();
+
+    std::lock_guard<std::mutex> lock(_vkPresentMutex);
+
+    const bool vulkanHooksInstalled = (o_CreateSwapchainKHR != nullptr || o_QueuePresentKHR != nullptr);
+
+    return _dx11OverlayRoute.TrySelect(true, State::Instance().isRunningOnLinux, usesDxvk, isD3D11, willPresent,
+                                       overlayEnabled, vulkanHooksInstalled);
+#else
+    // Not an ARM64EC build: the DX11 fallback route does not exist, so the
+    // present path is left to the existing Vulkan/DX11 logic unchanged.
+    (void) isD3D11;
+    (void) willPresent;
+    return false;
+#endif
+}
+
 VALIDATE_HOOK(hkvkCreateWin32SurfaceKHR, PFN_vkCreateWin32SurfaceKHR)
 static VkResult hkvkCreateWin32SurfaceKHR(VkInstance instance, const VkWin32SurfaceCreateInfoKHR* pCreateInfo,
                                           const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface)
@@ -122,7 +167,7 @@ static VkResult hkvkCreateWin32SurfaceKHR(VkInstance instance, const VkWin32Surf
     auto procHwnd = Util::GetProcessWindow();
     LOG_DEBUG("procHwnd: {0:X}, swapchain hwnd: {1:X}", (UINT64) procHwnd, (UINT64) pCreateInfo->hwnd);
 
-    if (result == VK_SUCCESS && !State::Instance().vulkanSkipHooks)
+    if (result == VK_SUCCESS && !State::Instance().vulkanSkipHooks && !_dx11OverlayRoute.IsSelected())
     {
         MenuOverlayVk::DestroyVulkanObjects(false);
 
@@ -524,4 +569,7 @@ void VulkanHooks::Unhook()
         o_vkCreateWin32SurfaceKHR = nullptr;
         // o_vkCmdPipelineBarrier = nullptr;
     }
+
+    // Normal shutdown: relinquish any DX11 overlay route this process selected.
+    _dx11OverlayRoute.Reset();
 }

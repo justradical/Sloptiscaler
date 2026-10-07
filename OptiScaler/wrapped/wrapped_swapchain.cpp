@@ -7,6 +7,7 @@
 #include <nvapi/fakenvapi.h>
 #include <hooks/Reflex_Hooks.h>
 #include <hooks/D3D12_Hooks.h>
+#include <hooks/Vulkan_Hooks.h>
 #include <with_dx12/dx11_with_dx12_sync.h>
 
 #include <menu/menu_overlay_dx.h>
@@ -463,6 +464,16 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     // DXVK check, it's here because of upscaler time calculations
     if (IdentifyGpu::getPrimaryGpu().usesDxvk)
     {
+        // On ARM64EC under Proton the game presents through this D3D11
+        // swapchain, but the process may never call the PE-side Vulkan
+        // presentation hooks (vkCreateSwapchainKHR / vkQueuePresentKHR), so the
+        // Vulkan overlay is never installed and normally nothing draws. Draw the
+        // existing DX11 overlay here instead, but only while Vulkan has not
+        // claimed the present chain: TryUseDx11Overlay returns true only when no
+        // Vulkan hooks are installed and this route owns the overlay.
+        if (VulkanHooks::TryUseDx11Overlay(isD3D11, willPresent))
+            MenuOverlayDx::Present(pSwapChain, SyncInterval, Flags, pPresentParameters, pDevice, hWnd, isUWP);
+
         if (pPresentParameters == nullptr)
             presentResult = pSwapChain->Present(SyncInterval, Flags);
         else

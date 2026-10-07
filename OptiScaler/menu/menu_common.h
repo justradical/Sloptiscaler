@@ -123,6 +123,10 @@ class MenuCommon
     inline static void ShowResetButton(CustomOptional<bool, NoDefault>* initFlag, std::string buttonName);
     inline static void ReInitUpscaler();
 
+    // Shared menu-visibility setter. Extracted from the input/shortcut path so the
+    // keyboard toggle and a direct overlay-control command apply identical effects.
+    static void SetMenuVisible(bool visible);
+
     inline static void SeparatorWithHelpMarker(const char* label, const char* tip);
 
     static Upscaler GetBackendCode(const API api);
@@ -143,6 +147,7 @@ class MenuCommon
     // RenderMenu orchestration helpers. These keep the public RenderMenu() flow short
     // while preserving the original ImGui layout and draw order.
     static void UpdateRenderTiming(RenderMenuContext& ctx);
+    static void PollOverlayControl(RenderMenuContext& ctx);
     static void UpdateMenuInputMode(RenderMenuContext& ctx);
     static void HandleMenuShortcuts(RenderMenuContext& ctx);
     static void UpdateVersionAndStartupNotifications(RenderMenuContext& ctx);

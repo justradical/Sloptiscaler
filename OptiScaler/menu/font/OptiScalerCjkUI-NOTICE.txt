@@ -1,0 +1,39 @@
+OptiScaler CJK UI - font subset NOTICE
+======================================
+
+This is a glyph SUBSET of an existing OpenType collection face: only
+glyphs the translated Chinese UI does not need were removed. No outline
+was modified and it is not a new typeface.
+
+Source font (read-only input, left unmodified)
+---------------------------------------------
+File        : downloads/NotoSansCJK-Regular.ttc
+Bytes       : 19484784
+Face index  : 2
+Family      : Noto Sans CJK SC
+Copyright   : © 2014-2021 Adobe (http://www.adobe.com/).
+License     : This Font Software is licensed under the SIL Open Font License, Version 1.1. This Font Software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the SIL Open Font License for the specific language, permissions and limitations governing your use of this Font Software.
+
+Subset output
+-------------
+File        : output/OptiScalerCjkUI-Regular.otf
+Bytes       : 317916
+Family      : OptiScaler CJK UI
+PostScript  : OptiScalerCjkUI-Regular
+Glyphs      : 1385
+Codepoints  : 773 requested / 773 covered / 0 missing
+
+Licensing
+---------
+The source font is licensed under the SIL Open Font License, Version 1.1.
+The unchanged OFL 1.1 text stays a separate file (OptiScalerCjkUI-LICENSE.txt); it is
+neither embedded here nor modified. The original copyright (name ID 0),
+license (ID 13) and license URL (ID 14) name records are preserved verbatim.
+Only the primary family / full / PostScript names changed, to 'OptiScaler CJK UI' and
+'OptiScalerCjkUI-Regular', as OFL 1.1 section 3 requires. This subset stays
+under the same OFL 1.1 terms.
+
+The subset is an uncompressed SFNT and contains only the requested
+codepoints (non-ASCII by construction), so it must be merged in ImGui
+(MergeMode) with the base font for ASCII/English to keep rendering. The
+official ImGui font_compressor is run separately by Codex.

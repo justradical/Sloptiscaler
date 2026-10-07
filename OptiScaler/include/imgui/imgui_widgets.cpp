@@ -44,6 +44,10 @@ Index of this file:
 #ifndef IMGUI_DISABLE
 #include "imgui_internal.h"
 
+// OptiScaler bilingual display layer: English is the source and the fallback;
+// only display copies are translated, never ids/labels/persistence keys.
+#include "../../menu/menu_i18n.h"
+
 // System includes
 #include <stdint.h>     // intptr_t
 
@@ -283,6 +287,11 @@ void ImGui::TextV(const char* fmt, va_list args)
     ImGuiWindow* window = GetCurrentWindow();
     if (window->SkipItems)
         return;
+
+    // Display translation only: a known English format is swapped for its
+    // Chinese form before formatting. Unknown text and the English mode return
+    // the very same pointer, so ids/persistence derived from 'fmt' are untouched.
+    fmt = OptiI18n::Format(fmt);
 
     const char* text, *text_end;
     ImFormatStringToTempBufferV(&text, &text_end, fmt, args);
